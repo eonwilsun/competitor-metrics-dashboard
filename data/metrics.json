@@ -1,46 +1,110 @@
 {
-  "generatedAt": "2026-03-05T00:00:00Z",
+  "generatedAt": "2026-03-05T12:41:13.575Z",
   "companies": [
-    { "id": "swiis", "name": "Swiis Foster Care", "domain": "swiisfostercare.com" },
-    { "id": "nfa", "name": "NFA", "domain": "nationalfosteringgroup.co.uk" },
-    { "id": "fca", "name": "FCA", "domain": "thefca.co.uk" },
-    { "id": "compass", "name": "Compass", "domain": "compassfostering.com" },
-    { "id": "capstone", "name": "Capstone", "domain": "capstonefostercare.co.uk" },
-    { "id": "tact", "name": "TACT", "domain": "tactfostering.org.uk" },
-    { "id": "orangegrove", "name": "Orange Grove", "domain": "orangegrovefostercare.co.uk" }
+    {
+      "id": "swiis",
+      "name": "Swiis Foster Care",
+      "domain": "swiisfostercare.com"
+    },
+    {
+      "id": "nfa",
+      "name": "NFA",
+      "domain": "nationalfosteringgroup.co.uk"
+    },
+    {
+      "id": "fca",
+      "name": "FCA",
+      "domain": "thefca.co.uk"
+    },
+    {
+      "id": "compass",
+      "name": "Compass",
+      "domain": "compassfostering.com"
+    },
+    {
+      "id": "capstone",
+      "name": "Capstone",
+      "domain": "capstonefostercare.co.uk"
+    },
+    {
+      "id": "tact",
+      "name": "TACT",
+      "domain": "tactfostering.org.uk"
+    },
+    {
+      "id": "orangegrove",
+      "name": "Orange Grove",
+      "domain": "orangegrovefostercare.co.uk"
+    }
   ],
   "datasets": [
     {
       "id": "seo",
       "name": "SEO (SEMrush)",
       "metrics": [
-        { "id": "authorityScore", "label": "Authority Score", "format": "int" },
-        { "id": "refDomains", "label": "Referring Domains", "format": "int" },
-        { "id": "organicKeywords", "label": "Organic Keywords", "format": "int" },
-        { "id": "organicTraffic", "label": "Organic Traffic (est.)", "format": "int" }
+        {
+          "id": "authorityScore",
+          "label": "Authority Score",
+          "format": "int"
+        },
+        {
+          "id": "refDomains",
+          "label": "Referring Domains",
+          "format": "int"
+        },
+        {
+          "id": "organicKeywords",
+          "label": "Organic Keywords",
+          "format": "int"
+        },
+        {
+          "id": "organicTraffic",
+          "label": "Organic Traffic (est.)",
+          "format": "int"
+        }
       ]
     },
     {
       "id": "instagram",
       "name": "Instagram (FetchRSS)",
       "metrics": [
-        { "id": "followers", "label": "Followers", "format": "int" },
-        { "id": "postsMonthly", "label": "Posts / month", "format": "int" },
-        { "id": "engagementsMonthly", "label": "Engagements / month", "format": "int" }
+        {
+          "id": "followers",
+          "label": "Followers",
+          "format": "int"
+        },
+        {
+          "id": "postsMonthly",
+          "label": "Posts / month",
+          "format": "int"
+        },
+        {
+          "id": "engagementsMonthly",
+          "label": "Engagements / month",
+          "format": "int"
+        }
       ]
     },
     {
       "id": "metaAds",
       "name": "Meta Ads",
       "metrics": [
-        { "id": "adsRunning", "label": "Ads running", "format": "int" }
+        {
+          "id": "adsRunning",
+          "label": "Ads running",
+          "format": "int"
+        }
       ]
     },
     {
       "id": "press",
       "name": "Press (GDELT)",
       "metrics": [
-        { "id": "mentionsMonthly", "label": "Mentions (last 30d)", "format": "int" }
+        {
+          "id": "mentionsMonthly",
+          "label": "Mentions (last 30d)",
+          "format": "int"
+        }
       ]
     }
   ],
