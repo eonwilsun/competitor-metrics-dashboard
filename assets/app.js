@@ -1,4 +1,4 @@
-const DATA_URL = "data/sample-metrics.json";
+const DATA_URL = "data/metrics.json";
 
 const state = {
   timeRange: "thisMonth",
