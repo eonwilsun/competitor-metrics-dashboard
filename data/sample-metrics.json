@@ -1,0 +1,73 @@
+{
+  "generatedAt": "2026-03-05T00:00:00Z",
+  "companies": [
+    { "id": "swiis", "name": "Swiis Foster Care", "domain": "swiisfostercare.com" },
+    { "id": "nfa", "name": "NFA", "domain": "nationalfosteringgroup.co.uk" },
+    { "id": "fca", "name": "FCA", "domain": "thefca.co.uk" },
+    { "id": "compass", "name": "Compass", "domain": "compassfostering.com" },
+    { "id": "capstone", "name": "Capstone", "domain": "capstonefostercare.co.uk" },
+    { "id": "tact", "name": "TACT", "domain": "tactfostering.org.uk" },
+    { "id": "orangegrove", "name": "Orange Grove", "domain": "orangegrovefostercare.co.uk" }
+  ],
+  "datasets": [
+    {
+      "id": "seo",
+      "name": "SEO (SEMrush)",
+      "metrics": [
+        { "id": "authorityScore", "label": "Authority Score", "format": "int" },
+        { "id": "refDomains", "label": "Referring Domains", "format": "int" },
+        { "id": "organicKeywords", "label": "Organic Keywords", "format": "int" },
+        { "id": "organicTraffic", "label": "Organic Traffic (est.)", "format": "int" }
+      ]
+    },
+    {
+      "id": "instagram",
+      "name": "Instagram (FetchRSS)",
+      "metrics": [
+        { "id": "followers", "label": "Followers", "format": "int" },
+        { "id": "postsMonthly", "label": "Posts / month", "format": "int" },
+        { "id": "engagementsMonthly", "label": "Engagements / month", "format": "int" }
+      ]
+    },
+    {
+      "id": "metaAds",
+      "name": "Meta Ads",
+      "metrics": [
+        { "id": "adsRunning", "label": "Ads running", "format": "int" }
+      ]
+    },
+    {
+      "id": "press",
+      "name": "Press (GDELT)",
+      "metrics": [
+        { "id": "mentionsMonthly", "label": "Mentions (last 30d)", "format": "int" }
+      ]
+    }
+  ],
+  "snapshots": [
+    {
+      "month": "2026-03",
+      "values": {
+        "swiis": { "seo": { "authorityScore": 41, "refDomains": 612, "organicKeywords": 1250, "organicTraffic": 9500 }, "instagram": { "followers": 2200, "postsMonthly": 12, "engagementsMonthly": 480 }, "metaAds": { "adsRunning": 4 }, "press": { "mentionsMonthly": 8 } },
+        "nfa": { "seo": { "authorityScore": 55, "refDomains": 1450, "organicKeywords": 5200, "organicTraffic": 41000 }, "instagram": { "followers": 7600, "postsMonthly": 18, "engagementsMonthly": 2200 }, "metaAds": { "adsRunning": 9 }, "press": { "mentionsMonthly": 15 } },
+        "fca": { "seo": { "authorityScore": 58, "refDomains": 1600, "organicKeywords": 6100, "organicTraffic": 46000 }, "instagram": { "followers": 8300, "postsMonthly": 16, "engagementsMonthly": 2100 }, "metaAds": { "adsRunning": 7 }, "press": { "mentionsMonthly": 18 } },
+        "compass": { "seo": { "authorityScore": 50, "refDomains": 980, "organicKeywords": 3400, "organicTraffic": 24000 }, "instagram": { "followers": 5400, "postsMonthly": 14, "engagementsMonthly": 1300 }, "metaAds": { "adsRunning": 6 }, "press": { "mentionsMonthly": 11 } },
+        "capstone": { "seo": { "authorityScore": 47, "refDomains": 820, "organicKeywords": 2800, "organicTraffic": 19000 }, "instagram": { "followers": 4100, "postsMonthly": 10, "engagementsMonthly": 900 }, "metaAds": { "adsRunning": 3 }, "press": { "mentionsMonthly": 9 } },
+        "tact": { "seo": { "authorityScore": 62, "refDomains": 2100, "organicKeywords": 8200, "organicTraffic": 68000 }, "instagram": { "followers": 12500, "postsMonthly": 22, "engagementsMonthly": 3900 }, "metaAds": { "adsRunning": 12 }, "press": { "mentionsMonthly": 25 } },
+        "orangegrove": { "seo": { "authorityScore": 44, "refDomains": 700, "organicKeywords": 2100, "organicTraffic": 14000 }, "instagram": { "followers": 3600, "postsMonthly": 9, "engagementsMonthly": 750 }, "metaAds": { "adsRunning": 2 }, "press": { "mentionsMonthly": 7 } }
+      }
+    },
+    {
+      "month": "2026-02",
+      "values": {
+        "swiis": { "seo": { "authorityScore": 40, "refDomains": 605, "organicKeywords": 1200, "organicTraffic": 9100 }, "instagram": { "followers": 2150, "postsMonthly": 11, "engagementsMonthly": 450 }, "metaAds": { "adsRunning": 5 }, "press": { "mentionsMonthly": 6 } },
+        "nfa": { "seo": { "authorityScore": 54, "refDomains": 1420, "organicKeywords": 5050, "organicTraffic": 39500 }, "instagram": { "followers": 7400, "postsMonthly": 17, "engagementsMonthly": 2100 }, "metaAds": { "adsRunning": 10 }, "press": { "mentionsMonthly": 13 } },
+        "fca": { "seo": { "authorityScore": 57, "refDomains": 1580, "organicKeywords": 5900, "organicTraffic": 44200 }, "instagram": { "followers": 8100, "postsMonthly": 15, "engagementsMonthly": 2000 }, "metaAds": { "adsRunning": 8 }, "press": { "mentionsMonthly": 16 } },
+        "compass": { "seo": { "authorityScore": 49, "refDomains": 960, "organicKeywords": 3300, "organicTraffic": 23200 }, "instagram": { "followers": 5200, "postsMonthly": 13, "engagementsMonthly": 1200 }, "metaAds": { "adsRunning": 5 }, "press": { "mentionsMonthly": 10 } },
+        "capstone": { "seo": { "authorityScore": 46, "refDomains": 805, "organicKeywords": 2700, "organicTraffic": 18200 }, "instagram": { "followers": 4000, "postsMonthly": 10, "engagementsMonthly": 860 }, "metaAds": { "adsRunning": 4 }, "press": { "mentionsMonthly": 8 } },
+        "tact": { "seo": { "authorityScore": 61, "refDomains": 2050, "organicKeywords": 7900, "organicTraffic": 65500 }, "instagram": { "followers": 12100, "postsMonthly": 20, "engagementsMonthly": 3600 }, "metaAds": { "adsRunning": 13 }, "press": { "mentionsMonthly": 22 } },
+        "orangegrove": { "seo": { "authorityScore": 43, "refDomains": 690, "organicKeywords": 2000, "organicTraffic": 13500 }, "instagram": { "followers": 3500, "postsMonthly": 9, "engagementsMonthly": 710 }, "metaAds": { "adsRunning": 2 }, "press": { "mentionsMonthly": 6 } }
+      }
+    }
+  ]
+}
