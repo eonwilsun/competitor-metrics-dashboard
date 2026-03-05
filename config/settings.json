@@ -1,0 +1,9 @@
+{
+  "semrush": {
+    "database": "uk"
+  },
+  "press": {
+    "windowDays": 30,
+    "mode": "gdelt"
+  }
+}
