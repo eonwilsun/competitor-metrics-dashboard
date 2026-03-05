@@ -1,0 +1,36 @@
+name: Monthly refresh (Xano)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Runs at 06:15 UTC on the 1st of every month
+    - cron: "15 6 1 * *"
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print intention
+        run: |
+          echo "Monthly refresh job started."
+          echo "This will call Xano to pull SEMrush / FetchRSS / Meta Ads / GDELT and store snapshots."
+
+      - name: Check secrets presence (non-failing)
+        env:
+          XANO_BASE_URL: ${{ secrets.XANO_BASE_URL }}
+          XANO_API_KEY: ${{ secrets.XANO_API_KEY }}
+        run: |
+          if [ -z "$XANO_BASE_URL" ]; then
+            echo "XANO_BASE_URL is not set yet."
+          else
+            echo "XANO_BASE_URL is set."
+          fi
+
+          if [ -z "$XANO_API_KEY" ]; then
+            echo "XANO_API_KEY is not set yet."
+          else
+            echo "XANO_API_KEY is set."
+          fi
+
+      - name: Placeholder (success)
+        run: echo "Done (placeholder)."
