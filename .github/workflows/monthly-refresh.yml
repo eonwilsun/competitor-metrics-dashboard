@@ -1,36 +1,42 @@
-name: Monthly refresh (Xano)
+name: Monthly refresh (SEMrush + GDELT)
 
 on:
   workflow_dispatch:
   schedule:
-    # Runs at 06:15 UTC on the 1st of every month
+    # 06:15 UTC on the 1st of every month
     - cron: "15 6 1 * *"
+
+permissions:
+  contents: write
 
 jobs:
   refresh:
     runs-on: ubuntu-latest
     steps:
-      - name: Print intention
-        run: |
-          echo "Monthly refresh job started."
-          echo "This will call Xano to pull SEMrush / FetchRSS / Meta Ads / GDELT and store snapshots."
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Check secrets presence (non-failing)
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Refresh metrics.json
         env:
-          XANO_BASE_URL: ${{ secrets.XANO_BASE_URL }}
-          XANO_API_KEY: ${{ secrets.XANO_API_KEY }}
+          SEMRUSH_API_KEY: ${{ secrets.SEMRUSH_API_KEY }}
+        run: node scripts/refresh-metrics.mjs
+
+      - name: Commit updated metrics.json
         run: |
-          if [ -z "$XANO_BASE_URL" ]; then
-            echo "XANO_BASE_URL is not set yet."
-          else
-            echo "XANO_BASE_URL is set."
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add data/metrics.json
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
           fi
 
-          if [ -z "$XANO_API_KEY" ]; then
-            echo "XANO_API_KEY is not set yet."
-          else
-            echo "XANO_API_KEY is set."
-          fi
-
-      - name: Placeholder (success)
-        run: echo "Done (placeholder)."
+          git commit -m "chore: monthly metrics refresh"
+          git push
