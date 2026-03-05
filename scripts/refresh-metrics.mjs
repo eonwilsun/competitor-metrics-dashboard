@@ -88,9 +88,6 @@ function parseSemrushDomainRank(text) {
   const headers = lines[0].split(";");
   const values = lines[1].split(";");
 
-  // Support BOTH SEMrush header styles:
-  // 1) Dn;Ot;Or
-  // 2) Domain;Organic Traffic;Organic Keywords
   const idxTraffic = headers.indexOf("Ot") >= 0 ? headers.indexOf("Ot") : headers.indexOf("Organic Traffic");
   const idxKeywords = headers.indexOf("Or") >= 0 ? headers.indexOf("Or") : headers.indexOf("Organic Keywords");
 
@@ -100,9 +97,7 @@ function parseSemrushDomainRank(text) {
   return {
     organicTraffic: Number.isFinite(organicTraffic) ? organicTraffic : null,
     organicKeywords: Number.isFinite(organicKeywords) ? organicKeywords : null,
-    error: null,
-    rawFirstLine: lines[0].slice(0, 200),
-    rawSecondLine: lines[1].slice(0, 200)
+    error: null
   };
 }
 
@@ -122,7 +117,6 @@ async function semrushDomainRank({ apiKey, domain, database }) {
 }
 
 function gdeltWrapOrQuery(q) {
-  // GDELT error says: "Queries containing OR'd terms must be surrounded by ()."
   if (!q) return q;
   const trimmed = q.trim();
   if (/\sOR\s/i.test(trimmed) && !(trimmed.startsWith("(") && trimmed.endsWith(")"))) {
@@ -165,7 +159,7 @@ async function gdeltMentionsCount({ query, windowDays }) {
   return total || 0;
 }
 
-// --- Instagram (RSS) helpers (no external deps) ---
+// --- Instagram (RSS.app) helpers (no external deps) ---
 
 function decodeXmlEntities(s) {
   return (s || "")
@@ -190,7 +184,6 @@ function parseRssItems(xml) {
   const out = [];
   if (!xml) return out;
 
-  // Grab each <item>...</item>
   const itemRegex = /<item\b[^>]*>([\s\S]*?)<\/item>/gi;
   let m;
   while ((m = itemRegex.exec(xml))) {
@@ -224,11 +217,30 @@ function countItemsInWindow(items, windowDays) {
   return count;
 }
 
-async function instagramPostsMonthlyFromRss({ feedUrl, windowDays }) {
-  if (!feedUrl) return null;
+function parseFollowersFromChannelDescription(xml) {
+  // Example in your feed:
+  // <description><![CDATA[ 2,338 Followers - Capstone Foster Care (@capstonefostercare) ]]></description>
+  const descRaw = firstMatch(xml, /<channel\b[^>]*>[\s\S]*?<description>([\s\S]*?)<\/description>/i);
+  const desc = decodeXmlEntities(stripCdata((descRaw || "").trim()));
+  if (!desc) return null;
+
+  const m = desc.match(/([\d,]+)\s+Followers/i);
+  if (!m) return null;
+
+  const n = Number(String(m[1]).replaceAll(",", ""));
+  return Number.isFinite(n) ? n : null;
+}
+
+async function instagramMetricsFromRss({ feedUrl, windowDays }) {
+  if (!feedUrl) return { followers: null, postsMonthly: null };
+
   const xml = await fetchText(feedUrl);
+
+  const followers = parseFollowersFromChannelDescription(xml);
   const items = parseRssItems(xml);
-  return countItemsInWindow(items, windowDays);
+  const postsMonthly = countItemsInWindow(items, windowDays);
+
+  return { followers, postsMonthly };
 }
 
 function normalizeMetricsShape(metrics, companiesCfg) {
@@ -256,7 +268,8 @@ async function main() {
   const windowDays = settings?.press?.windowDays ?? 30;
 
   const igWindowDays = settings?.instagram?.windowDays ?? 30;
-  const igFeeds = settings?.instagram?.feeds && typeof settings.instagram.feeds === "object" ? settings.instagram.feeds : {};
+  const igFeeds =
+    settings?.instagram?.feeds && typeof settings.instagram.feeds === "object" ? settings.instagram.feeds : {};
 
   const month = monthKeyUTC(new Date());
 
@@ -295,32 +308,38 @@ async function main() {
 
         console.log(`  SEMrush (${db}): traffic=${organicTraffic}, keywords=${organicKeywords}`);
 
-        // If we got anything non-null, keep it
         if (organicTraffic !== null || organicKeywords !== null) break;
       } catch (e) {
         console.log(`  SEMrush (${db}) failed: ${String(e?.message || e)}`);
       }
     }
 
-    // Instagram (RSS)
+    // Instagram (RSS.app)
+    let instagramFollowers = null;
     let instagramPostsMonthly = null;
+
     const feedUrl = igFeeds?.[c.id] || null;
     if (feedUrl) {
       try {
-        instagramPostsMonthly = await withRetries(
-          async () => instagramPostsMonthlyFromRss({ feedUrl, windowDays: igWindowDays }),
-          { retries: 2, baseDelayMs: 3000 }
+        const ig = await withRetries(async () => instagramMetricsFromRss({ feedUrl, windowDays: igWindowDays }), {
+          retries: 2,
+          baseDelayMs: 3000
+        });
+        instagramFollowers = ig.followers;
+        instagramPostsMonthly = ig.postsMonthly;
+        console.log(
+          `  Instagram RSS: followers=${instagramFollowers ?? "null"}, posts(last ${igWindowDays}d)=${instagramPostsMonthly ?? "null"}`
         );
-        console.log(`  Instagram RSS posts (last ${igWindowDays}d): ${instagramPostsMonthly}`);
       } catch (e) {
-        console.log(`  Instagram RSS failed (storing null): ${String(e?.message || e)}`);
+        console.log(`  Instagram RSS failed (storing nulls): ${String(e?.message || e)}`);
+        instagramFollowers = null;
         instagramPostsMonthly = null;
       }
     } else {
-      console.log("  Instagram RSS: no feed configured (storing null)");
+      console.log("  Instagram RSS: no feed configured (storing nulls)");
     }
 
-    // GDELT — store 0 on failure to keep dashboard stable
+    // GDELT
     let mentionsMonthly = 0;
     try {
       mentionsMonthly = await withRetries(async () => gdeltMentionsCount({ query: c.pressQuery || c.name, windowDays }), {
@@ -333,7 +352,6 @@ async function main() {
       mentionsMonthly = 0;
     }
 
-    // Space GDELT requests to reduce 429
     await sleep(11000);
 
     values[c.id] = {
@@ -343,7 +361,7 @@ async function main() {
         organicKeywords,
         organicTraffic
       },
-      instagram: { followers: null, postsMonthly: instagramPostsMonthly, engagementsMonthly: null },
+      instagram: { followers: instagramFollowers, postsMonthly: instagramPostsMonthly, engagementsMonthly: null },
       metaAds: { adsRunning: null },
       press: { mentionsMonthly }
     };
