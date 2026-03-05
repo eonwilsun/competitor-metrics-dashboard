@@ -17,7 +17,7 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function withRetries(fn, { retries = 3, baseDelayMs = 5000 } = {}) {
+async function withRetries(fn, { retries = 2, baseDelayMs = 3000 } = {}) {
   let lastErr;
   for (let i = 0; i <= retries; i++) {
     try {
@@ -25,9 +25,7 @@ async function withRetries(fn, { retries = 3, baseDelayMs = 5000 } = {}) {
     } catch (e) {
       lastErr = e;
       const delay = baseDelayMs * Math.max(1, i + 1);
-      console.log(
-        `Retry ${i + 1}/${retries + 1} after error: ${String(e?.message || e)}. Sleeping ${delay}ms...`
-      );
+      console.log(`Retry ${i + 1}/${retries + 1} after error: ${String(e?.message || e)}. Sleeping ${delay}ms...`);
       await sleep(delay);
     }
   }
@@ -48,18 +46,68 @@ async function writeJson(p, obj) {
   await fs.writeFile(p, JSON.stringify(obj, null, 2) + "\n", "utf8");
 }
 
-async function fetchJson(url) {
+async function fetchText(url) {
   const res = await fetch(url);
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`HTTP ${res.status} for ${url}\n${text}`);
-  }
-  return res.json();
+  const text = await res.text().catch(() => "");
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}\n${text}`);
+  return text;
 }
 
-/**
- * SEMrush starter: domain_rank -> organic traffic (Ot) and organic keywords (Or)
- */
+async function fetchJsonLenient(url) {
+  const res = await fetch(url);
+  const text = await res.text().catch(() => "");
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}\n${text}`);
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    // GDELT sometimes returns plain text like "Queries co..."
+    throw new Error(`Non-JSON response for ${url}\n${text.slice(0, 200)}`);
+  }
+}
+
+function pickDatabaseOrder(domain, defaultDb) {
+  // Try sensible defaults:
+  // - .co.uk / .org.uk -> uk first
+  // - .com -> us first
+  const d = (domain || "").toLowerCase();
+  const isUk = d.endsWith(".co.uk") || d.endsWith(".org.uk") || d.endsWith(".ac.uk");
+  const isCom = d.endsWith(".com");
+
+  if (isCom) return ["us", defaultDb].filter(Boolean);
+  if (isUk) return [defaultDb || "uk", "us"].filter(Boolean);
+
+  return [defaultDb || "uk", "us"].filter(Boolean);
+}
+
+function parseSemrushDomainRank(text) {
+  // SEMrush returns ; separated by default
+  // Handle common "ERROR" outputs
+  const t = (text || "").trim();
+  if (!t) return { organicTraffic: null, organicKeywords: null, error: "Empty SEMrush response" };
+  if (/^ERROR/i.test(t)) return { organicTraffic: null, organicKeywords: null, error: t };
+
+  const lines = t.split(/\r?\n/);
+  if (lines.length < 2) {
+    return { organicTraffic: null, organicKeywords: null, error: `Unexpected SEMrush format: ${t.slice(0, 120)}` };
+  }
+
+  const headers = lines[0].split(";");
+  const values = lines[1].split(";");
+
+  // Our requested columns: Dn,Ot,Or
+  const idxOt = headers.indexOf("Ot");
+  const idxOr = headers.indexOf("Or");
+
+  const organicTraffic = idxOt >= 0 ? Number(values[idxOt]) : null;
+  const organicKeywords = idxOr >= 0 ? Number(values[idxOr]) : null;
+
+  return {
+    organicTraffic: Number.isFinite(organicTraffic) ? organicTraffic : null,
+    organicKeywords: Number.isFinite(organicKeywords) ? organicKeywords : null,
+    error: null
+  };
+}
+
 async function semrushDomainRank({ apiKey, domain, database }) {
   const url =
     "https://api.semrush.com/?" +
@@ -71,29 +119,15 @@ async function semrushDomainRank({ apiKey, domain, database }) {
       export_columns: "Dn,Ot,Or"
     }).toString();
 
-  const res = await fetch(url);
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`SEMrush error HTTP ${res.status} for ${domain}\n${text}`);
+  const text = await fetchText(url);
+  const parsed = parseSemrushDomainRank(text);
+
+  // Help debug: show first part only (no API key leaked)
+  if (parsed.error) {
+    console.log(`  SEMrush raw (first 120): ${text.trim().slice(0, 120)}`);
   }
-  const text = await res.text();
 
-  const lines = text.trim().split(/\r?\n/);
-  if (lines.length < 2) return { organicTraffic: null, organicKeywords: null };
-
-  const headers = lines[0].split(";");
-  const values = lines[1].split(";");
-
-  const idxOt = headers.indexOf("Ot");
-  const idxOr = headers.indexOf("Or");
-
-  const organicTraffic = idxOt >= 0 ? Number(values[idxOt]) : null;
-  const organicKeywords = idxOr >= 0 ? Number(values[idxOr]) : null;
-
-  return {
-    organicTraffic: Number.isFinite(organicTraffic) ? organicTraffic : null,
-    organicKeywords: Number.isFinite(organicKeywords) ? organicKeywords : null
-  };
+  return parsed;
 }
 
 async function gdeltMentionsCount({ query, windowDays }) {
@@ -122,7 +156,7 @@ async function gdeltMentionsCount({ query, windowDays }) {
       enddatetime: fmt(end)
     }).toString();
 
-  const json = await fetchJson(url);
+  const json = await fetchJsonLenient(url);
   const timeline = json?.timeline || [];
   const total = timeline.reduce((sum, row) => sum + (Number(row?.value) || 0), 0);
   return total || 0;
@@ -130,14 +164,12 @@ async function gdeltMentionsCount({ query, windowDays }) {
 
 function normalizeMetricsShape(metrics, companiesCfg) {
   const out = metrics && typeof metrics === "object" ? metrics : {};
-
   if (!Array.isArray(out.snapshots)) out.snapshots = [];
   if (!Array.isArray(out.companies)) out.companies = [];
   if (!Array.isArray(out.datasets)) out.datasets = [];
 
   out.companies = companiesCfg.companies.map(({ id, name, domain }) => ({ id, name, domain }));
   out.generatedAt = out.generatedAt || new Date().toISOString();
-
   return out;
 }
 
@@ -151,7 +183,7 @@ async function main() {
   }
 
   const settings = await readJsonSafe(SETTINGS_PATH, {});
-  const database = settings?.semrush?.database || "uk";
+  const defaultDb = settings?.semrush?.database || "uk";
   const windowDays = settings?.press?.windowDays ?? 30;
 
   const month = monthKeyUTC(new Date());
@@ -168,44 +200,57 @@ async function main() {
   const values = {};
 
   console.log(`Refreshing metrics for month=${month}`);
-  console.log(`SEMrush database=${database}, Press windowDays=${windowDays}`);
+  console.log(`SEMrush defaultDb=${defaultDb}, Press windowDays=${windowDays}`);
   console.log(`Companies: ${companiesCfg.companies.length}`);
 
   for (const c of companiesCfg.companies) {
     console.log(`\nCompany: ${c.name} (${c.domain})`);
 
+    // SEMrush (try multiple DBs)
     let organicTraffic = null;
     let organicKeywords = null;
 
-    try {
-      const seo = await withRetries(
-        async () => semrushDomainRank({ apiKey, domain: c.domain, database }),
-        { retries: 2, baseDelayMs: 2500 }
-      );
-      organicTraffic = seo.organicTraffic;
-      organicKeywords = seo.organicKeywords;
-      console.log(`  SEMrush: traffic=${organicTraffic}, keywords=${organicKeywords}`);
-    } catch (e) {
-      console.log(`  SEMrush failed: ${String(e?.message || e)}`);
+    const dbOrder = pickDatabaseOrder(c.domain, defaultDb);
+    for (const db of dbOrder) {
+      try {
+        const res = await withRetries(
+          async () => semrushDomainRank({ apiKey, domain: c.domain, database: db }),
+          { retries: 1, baseDelayMs: 2000 }
+        );
+
+        if (res.error) {
+          console.log(`  SEMrush (${db}) parse/error: ${res.error.slice(0, 120)}`);
+          continue;
+        }
+
+        organicTraffic = res.organicTraffic;
+        organicKeywords = res.organicKeywords;
+
+        console.log(`  SEMrush (${db}): traffic=${organicTraffic}, keywords=${organicKeywords}`);
+
+        // If we got any non-null values, accept and stop
+        if (organicTraffic !== null || organicKeywords !== null) break;
+      } catch (e) {
+        console.log(`  SEMrush (${db}) failed: ${String(e?.message || e)}`);
+      }
     }
 
-    let mentionsMonthly = null;
+    // GDELT (be conservative)
+    let mentionsMonthly = 0;
     try {
       mentionsMonthly = await withRetries(
-        async () =>
-          gdeltMentionsCount({
-            query: c.pressQuery || c.name,
-            windowDays
-          }),
-        { retries: 4, baseDelayMs: 7000 }
+        async () => gdeltMentionsCount({ query: c.pressQuery || c.name, windowDays }),
+        { retries: 3, baseDelayMs: 10000 }
       );
       console.log(`  GDELT mentions (last ${windowDays}d): ${mentionsMonthly}`);
     } catch (e) {
-      console.log(`  GDELT failed (will store null): ${String(e?.message || e)}`);
-      mentionsMonthly = null;
+      // Store 0 instead of null to keep charts stable
+      console.log(`  GDELT failed (storing 0): ${String(e?.message || e)}`);
+      mentionsMonthly = 0;
     }
 
-    await sleep(7500);
+    // hard spacing between GDELT calls
+    await sleep(11000);
 
     values[c.id] = {
       seo: {
