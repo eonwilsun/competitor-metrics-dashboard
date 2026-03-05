@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="assets/style.css">
+    <title>Competitor Metrics Dashboard</title>
+</head>
+<body>
+    <h1>Competitor Metrics Dashboard</h1>
+    <div id="controls">
+        <h2>Filters</h2>
+        <div id="companyToggle"></div>
+        <div id="datasetToggle"></div>
+        <div id="timeRangeControl">
+            <label for="timeRange">Select Time Range:</label>
+            <select id="timeRange">
+                <option value="thisMonth">This Month</option>
+                <option value="lastMonth">Last Month</option>
+                <option value="last6Months">Last 6 Months</option>
+                <option value="lastYear">Last Year</option>
+            </select>
+        </div>
+    </div>
+    <div id="metricsDisplay"></div>
+    <script src="assets/app.js"></script>
+</body>
+</html>
