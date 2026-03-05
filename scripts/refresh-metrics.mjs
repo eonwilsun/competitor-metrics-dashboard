@@ -34,8 +34,13 @@ async function withRetries(fn, { retries = 3, baseDelayMs = 5000 } = {}) {
   throw lastErr;
 }
 
-async function readJson(p) {
-  return JSON.parse(await fs.readFile(p, "utf8"));
+async function readJsonSafe(p, fallback) {
+  try {
+    return JSON.parse(await fs.readFile(p, "utf8"));
+  } catch (e) {
+    console.log(`Warning: could not read/parse ${p}. Using fallback. Error=${String(e?.message || e)}`);
+    return fallback;
+  }
 }
 
 async function writeJson(p, obj) {
@@ -53,12 +58,7 @@ async function fetchJson(url) {
 }
 
 /**
- * SEMrush notes:
- * This uses the SEMrush "domain_rank" endpoint as a starter.
- * It returns organic traffic (Ot) and organic keywords (Or).
- *
- * Authority score and referring domains are not wired yet because SEMrush has
- * multiple endpoints/columns depending on plan.
+ * SEMrush starter: domain_rank -> organic traffic (Ot) and organic keywords (Or)
  */
 async function semrushDomainRank({ apiKey, domain, database }) {
   const url =
@@ -72,12 +72,12 @@ async function semrushDomainRank({ apiKey, domain, database }) {
     }).toString();
 
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`SEMrush error HTTP ${res.status} for ${domain}`);
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`SEMrush error HTTP ${res.status} for ${domain}\n${text}`);
+  }
   const text = await res.text();
 
-  // Expected:
-  // Dn;Ot;Or
-  // example.com;9500;1250
   const lines = text.trim().split(/\r?\n/);
   if (lines.length < 2) return { organicTraffic: null, organicKeywords: null };
 
@@ -128,21 +128,46 @@ async function gdeltMentionsCount({ query, windowDays }) {
   return total || 0;
 }
 
+function normalizeMetricsShape(metrics, companiesCfg) {
+  const out = metrics && typeof metrics === "object" ? metrics : {};
+
+  // Ensure required arrays exist
+  if (!Array.isArray(out.snapshots)) out.snapshots = [];
+  if (!Array.isArray(out.companies)) out.companies = [];
+  if (!Array.isArray(out.datasets)) out.datasets = [];
+
+  // Always align companies list to config
+  out.companies = companiesCfg.companies.map(({ id, name, domain }) => ({ id, name, domain }));
+
+  // If datasets missing (shouldn't be), keep existing or leave as-is.
+  out.generatedAt = out.generatedAt || new Date().toISOString();
+
+  return out;
+}
+
 async function main() {
   const apiKey = process.env.SEMRUSH_API_KEY;
   if (!apiKey) throw new Error("Missing SEMRUSH_API_KEY env var.");
 
-  const companiesCfg = await readJson(COMPANIES_PATH);
-  const settings = await readJson(SETTINGS_PATH);
+  const companiesCfg = await readJsonSafe(COMPANIES_PATH, { companies: [] });
+  if (!Array.isArray(companiesCfg.companies) || companiesCfg.companies.length === 0) {
+    throw new Error("config/companies.json is missing or has no companies.");
+  }
 
+  const settings = await readJsonSafe(SETTINGS_PATH, {});
   const database = settings?.semrush?.database || "uk";
   const windowDays = settings?.press?.windowDays ?? 30;
 
   const month = monthKeyUTC(new Date());
-  const metrics = await readJson(METRICS_PATH);
 
-  // Align companies list to config
-  metrics.companies = companiesCfg.companies.map(({ id, name, domain }) => ({ id, name, domain }));
+  const metricsRaw = await readJsonSafe(METRICS_PATH, {
+    generatedAt: new Date().toISOString(),
+    companies: [],
+    datasets: [],
+    snapshots: []
+  });
+
+  const metrics = normalizeMetricsShape(metricsRaw, companiesCfg);
 
   const values = {};
 
@@ -160,16 +185,16 @@ async function main() {
     try {
       const seo = await withRetries(
         async () => semrushDomainRank({ apiKey, domain: c.domain, database }),
-        { retries: 2, baseDelayMs: 2000 }
+        { retries: 2, baseDelayMs: 2500 }
       );
       organicTraffic = seo.organicTraffic;
       organicKeywords = seo.organicKeywords;
       console.log(`  SEMrush: traffic=${organicTraffic}, keywords=${organicKeywords}`);
     } catch (e) {
-      console.log(`  SEMrush failed for ${c.domain}: ${String(e?.message || e)}`);
+      console.log(`  SEMrush failed: ${String(e?.message || e)}`);
     }
 
-    // GDELT (rate-limited: ~1 request / 5 seconds)
+    // GDELT (rate limit)
     let mentionsMonthly = null;
     try {
       mentionsMonthly = await withRetries(
@@ -178,46 +203,37 @@ async function main() {
             query: c.pressQuery || c.name,
             windowDays
           }),
-        { retries: 3, baseDelayMs: 5000 }
+        { retries: 4, baseDelayMs: 7000 }
       );
       console.log(`  GDELT mentions (last ${windowDays}d): ${mentionsMonthly}`);
     } catch (e) {
-      console.log(`  GDELT failed for query="${c.pressQuery || c.name}": ${String(e?.message || e)}`);
+      // IMPORTANT: don't crash the run if GDELT rate limits; store null and continue.
+      console.log(`  GDELT failed (will store null): ${String(e?.message || e)}`);
       mentionsMonthly = null;
     }
 
-    // Respect GDELT guidance: one request every 5 seconds
-    await sleep(6000);
+    // Be extra-safe on GDELT guidance ("1 request every 5 seconds")
+    await sleep(7500);
 
     values[c.id] = {
       seo: {
-        authorityScore: null, // TODO: wire once SEMrush endpoint confirmed
-        refDomains: null,     // TODO: wire once SEMrush endpoint confirmed
+        authorityScore: null,
+        refDomains: null,
         organicKeywords,
         organicTraffic
       },
-      instagram: {
-        followers: null,
-        postsMonthly: null,
-        engagementsMonthly: null
-      },
-      metaAds: {
-        adsRunning: null
-      },
-      press: {
-        mentionsMonthly
-      }
+      instagram: { followers: null, postsMonthly: null, engagementsMonthly: null },
+      metaAds: { adsRunning: null },
+      press: { mentionsMonthly }
     };
   }
 
-  // Upsert snapshot for this month
-  const existingIdx = metrics.snapshots.findIndex((s) => s.month === month);
+  const existingIdx = metrics.snapshots.findIndex((s) => s?.month === month);
   const snapshot = { month, values };
 
   if (existingIdx >= 0) metrics.snapshots[existingIdx] = snapshot;
   else metrics.snapshots.push(snapshot);
 
-  // Keep snapshots sorted ascending
   metrics.snapshots.sort((a, b) => (a.month < b.month ? -1 : 1));
   metrics.generatedAt = new Date().toISOString();
 
