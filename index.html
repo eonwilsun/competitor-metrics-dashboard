@@ -1,28 +1,55 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="assets/style.css">
-    <title>Competitor Metrics Dashboard</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="assets/style.css" />
+  <title>Competitor Metrics Dashboard</title>
 </head>
 <body>
+  <header class="header">
     <h1>Competitor Metrics Dashboard</h1>
-    <div id="controls">
-        <h2>Filters</h2>
-        <div id="companyToggle"></div>
-        <div id="datasetToggle"></div>
-        <div id="timeRangeControl">
-            <label for="timeRange">Select Time Range:</label>
-            <select id="timeRange">
-                <option value="thisMonth">This Month</option>
-                <option value="lastMonth">Last Month</option>
-                <option value="last6Months">Last 6 Months</option>
-                <option value="lastYear">Last Year</option>
-            </select>
-        </div>
+    <p class="subtle" id="lastUpdated"></p>
+  </header>
+
+  <section class="controls" id="controls">
+    <div class="control-block">
+      <h2>Time Range</h2>
+      <label for="timeRange">Select Time Range:</label>
+      <select id="timeRange">
+        <option value="thisMonth">This Month</option>
+        <option value="lastMonth">Last Month</option>
+        <option value="last6Months">Last 6 Months</option>
+        <option value="lastYear">Last Year</option>
+      </select>
     </div>
-    <div id="metricsDisplay"></div>
-    <script src="assets/app.js"></script>
+
+    <div class="control-block">
+      <h2>Companies</h2>
+      <div class="control-actions">
+        <button id="companiesAllOn" type="button">All on</button>
+        <button id="companiesAllOff" type="button">All off</button>
+      </div>
+      <div id="companyToggle" class="toggle-grid"></div>
+    </div>
+
+    <div class="control-block">
+      <h2>Datasets</h2>
+      <div class="control-actions">
+        <button id="datasetsAllOn" type="button">All on</button>
+        <button id="datasetsAllOff" type="button">All off</button>
+      </div>
+      <div id="datasetToggle" class="toggle-grid"></div>
+    </div>
+  </section>
+
+  <main class="main">
+    <section class="card">
+      <h2>Metrics</h2>
+      <div id="metricsDisplay" class="table-wrap"></div>
+    </section>
+  </main>
+
+  <script src="assets/app.js"></script>
 </body>
 </html>
