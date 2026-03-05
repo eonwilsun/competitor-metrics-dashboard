@@ -86,11 +86,14 @@ function parseSemrushDomainRank(text) {
   const headers = lines[0].split(";");
   const values = lines[1].split(";");
 
-  const idxOt = headers.indexOf("Ot");
-  const idxOr = headers.indexOf("Or");
+  // Support BOTH SEMrush header styles:
+  // 1) Dn;Ot;Or
+  // 2) Domain;Organic Traffic;Organic Keywords
+  const idxTraffic = headers.indexOf("Ot") >= 0 ? headers.indexOf("Ot") : headers.indexOf("Organic Traffic");
+  const idxKeywords = headers.indexOf("Or") >= 0 ? headers.indexOf("Or") : headers.indexOf("Organic Keywords");
 
-  const organicTraffic = idxOt >= 0 ? Number(values[idxOt]) : null;
-  const organicKeywords = idxOr >= 0 ? Number(values[idxOr]) : null;
+  const organicTraffic = idxTraffic >= 0 ? Number(values[idxTraffic]) : null;
+  const organicKeywords = idxKeywords >= 0 ? Number(values[idxKeywords]) : null;
 
   return {
     organicTraffic: Number.isFinite(organicTraffic) ? organicTraffic : null,
@@ -118,7 +121,6 @@ async function semrushDomainRank({ apiKey, domain, database }) {
 
 function gdeltWrapOrQuery(q) {
   // GDELT error says: "Queries containing OR'd terms must be surrounded by ()."
-  // So if the query contains OR, wrap the whole thing.
   if (!q) return q;
   const trimmed = q.trim();
   if (/\sOR\s/i.test(trimmed) && !(trimmed.startsWith("(") && trimmed.endsWith(")"))) {
@@ -221,13 +223,8 @@ async function main() {
 
         console.log(`  SEMrush (${db}): traffic=${organicTraffic}, keywords=${organicKeywords}`);
 
-        // If still null, print the two CSV lines so we can see what SEMrush actually returned
-        if (organicTraffic === null && organicKeywords === null) {
-          console.log(`  SEMrush (${db}) CSV header: ${res.rawFirstLine || ""}`);
-          console.log(`  SEMrush (${db}) CSV row:    ${res.rawSecondLine || ""}`);
-        } else {
-          break;
-        }
+        // If we got anything non-null, keep it
+        if (organicTraffic !== null || organicKeywords !== null) break;
       } catch (e) {
         console.log(`  SEMrush (${db}) failed: ${String(e?.message || e)}`);
       }
@@ -246,6 +243,7 @@ async function main() {
       mentionsMonthly = 0;
     }
 
+    // Space GDELT requests to reduce 429
     await sleep(11000);
 
     values[c.id] = {
