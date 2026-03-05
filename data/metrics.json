@@ -4,6 +4,7 @@
   },
   "press": {
     "windowDays": 30,
-    "mode": "gdelt"
+    "mode": "gdelt",
+    "snapshots": []
   }
 }
