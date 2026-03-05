@@ -25,7 +25,9 @@ async function withRetries(fn, { retries = 2, baseDelayMs = 3000 } = {}) {
     } catch (e) {
       lastErr = e;
       const delay = baseDelayMs * Math.max(1, i + 1);
-      console.log(`Retry ${i + 1}/${retries + 1} after error: ${String(e?.message || e)}. Sleeping ${delay}ms...`);
+      console.log(
+        `Retry ${i + 1}/${retries + 1} after error: ${String(e?.message || e)}. Sleeping ${delay}ms...`
+      );
       await sleep(delay);
     }
   }
@@ -163,6 +165,72 @@ async function gdeltMentionsCount({ query, windowDays }) {
   return total || 0;
 }
 
+// --- Instagram (RSS) helpers (no external deps) ---
+
+function decodeXmlEntities(s) {
+  return (s || "")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&amp;", "&")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&apos;", "'");
+}
+
+function stripCdata(s) {
+  const m = (s || "").match(/^<!\[CDATA\[(.*)\]\]>$/s);
+  return m ? m[1] : s;
+}
+
+function firstMatch(xml, regex) {
+  const m = xml.match(regex);
+  return m ? m[1] : null;
+}
+
+function parseRssItems(xml) {
+  const out = [];
+  if (!xml) return out;
+
+  // Grab each <item>...</item>
+  const itemRegex = /<item\b[^>]*>([\s\S]*?)<\/item>/gi;
+  let m;
+  while ((m = itemRegex.exec(xml))) {
+    const itemXml = m[1];
+
+    const pubDateRaw =
+      firstMatch(itemXml, /<pubDate>([\s\S]*?)<\/pubDate>/i) ??
+      firstMatch(itemXml, /<dc:date>([\s\S]*?)<\/dc:date>/i) ??
+      firstMatch(itemXml, /<published>([\s\S]*?)<\/published>/i) ??
+      firstMatch(itemXml, /<updated>([\s\S]*?)<\/updated>/i);
+
+    const pubDateStr = decodeXmlEntities(stripCdata((pubDateRaw || "").trim()));
+    const pubDate = pubDateStr ? new Date(pubDateStr) : null;
+
+    out.push({ pubDate });
+  }
+
+  return out;
+}
+
+function countItemsInWindow(items, windowDays) {
+  const now = Date.now();
+  const start = now - windowDays * 24 * 60 * 60 * 1000;
+
+  let count = 0;
+  for (const it of items) {
+    const t = it?.pubDate instanceof Date ? it.pubDate.getTime() : NaN;
+    if (!Number.isFinite(t)) continue;
+    if (t >= start && t <= now) count++;
+  }
+  return count;
+}
+
+async function instagramPostsMonthlyFromRss({ feedUrl, windowDays }) {
+  if (!feedUrl) return null;
+  const xml = await fetchText(feedUrl);
+  const items = parseRssItems(xml);
+  return countItemsInWindow(items, windowDays);
+}
+
 function normalizeMetricsShape(metrics, companiesCfg) {
   const out = metrics && typeof metrics === "object" ? metrics : {};
   if (!Array.isArray(out.snapshots)) out.snapshots = [];
@@ -187,6 +255,9 @@ async function main() {
   const defaultDb = settings?.semrush?.database || "uk";
   const windowDays = settings?.press?.windowDays ?? 30;
 
+  const igWindowDays = settings?.instagram?.windowDays ?? 30;
+  const igFeeds = settings?.instagram?.feeds && typeof settings.instagram.feeds === "object" ? settings.instagram.feeds : {};
+
   const month = monthKeyUTC(new Date());
 
   const metricsRaw = await readJsonSafe(METRICS_PATH, {
@@ -202,6 +273,7 @@ async function main() {
 
   console.log(`Refreshing metrics for month=${month}`);
   console.log(`SEMrush defaultDb=${defaultDb}, Press windowDays=${windowDays}`);
+  console.log(`Instagram windowDays=${igWindowDays}, feedsConfigured=${Object.keys(igFeeds).length}`);
   console.log(`Companies: ${companiesCfg.companies.length}`);
 
   for (const c of companiesCfg.companies) {
@@ -213,10 +285,10 @@ async function main() {
     const dbOrder = pickDatabaseOrder(c.domain, defaultDb);
     for (const db of dbOrder) {
       try {
-        const res = await withRetries(
-          async () => semrushDomainRank({ apiKey, domain: c.domain, database: db }),
-          { retries: 1, baseDelayMs: 2000 }
-        );
+        const res = await withRetries(async () => semrushDomainRank({ apiKey, domain: c.domain, database: db }), {
+          retries: 1,
+          baseDelayMs: 2000
+        });
 
         organicTraffic = res.organicTraffic;
         organicKeywords = res.organicKeywords;
@@ -230,13 +302,31 @@ async function main() {
       }
     }
 
+    // Instagram (RSS)
+    let instagramPostsMonthly = null;
+    const feedUrl = igFeeds?.[c.id] || null;
+    if (feedUrl) {
+      try {
+        instagramPostsMonthly = await withRetries(
+          async () => instagramPostsMonthlyFromRss({ feedUrl, windowDays: igWindowDays }),
+          { retries: 2, baseDelayMs: 3000 }
+        );
+        console.log(`  Instagram RSS posts (last ${igWindowDays}d): ${instagramPostsMonthly}`);
+      } catch (e) {
+        console.log(`  Instagram RSS failed (storing null): ${String(e?.message || e)}`);
+        instagramPostsMonthly = null;
+      }
+    } else {
+      console.log("  Instagram RSS: no feed configured (storing null)");
+    }
+
     // GDELT — store 0 on failure to keep dashboard stable
     let mentionsMonthly = 0;
     try {
-      mentionsMonthly = await withRetries(
-        async () => gdeltMentionsCount({ query: c.pressQuery || c.name, windowDays }),
-        { retries: 3, baseDelayMs: 10000 }
-      );
+      mentionsMonthly = await withRetries(async () => gdeltMentionsCount({ query: c.pressQuery || c.name, windowDays }), {
+        retries: 3,
+        baseDelayMs: 10000
+      });
       console.log(`  GDELT mentions (last ${windowDays}d): ${mentionsMonthly}`);
     } catch (e) {
       console.log(`  GDELT failed (storing 0): ${String(e?.message || e)}`);
@@ -253,7 +343,7 @@ async function main() {
         organicKeywords,
         organicTraffic
       },
-      instagram: { followers: null, postsMonthly: null, engagementsMonthly: null },
+      instagram: { followers: null, postsMonthly: instagramPostsMonthly, engagementsMonthly: null },
       metaAds: { adsRunning: null },
       press: { mentionsMonthly }
     };
