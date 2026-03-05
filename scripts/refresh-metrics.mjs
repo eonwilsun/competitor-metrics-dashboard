@@ -131,15 +131,11 @@ async function gdeltMentionsCount({ query, windowDays }) {
 function normalizeMetricsShape(metrics, companiesCfg) {
   const out = metrics && typeof metrics === "object" ? metrics : {};
 
-  // Ensure required arrays exist
   if (!Array.isArray(out.snapshots)) out.snapshots = [];
   if (!Array.isArray(out.companies)) out.companies = [];
   if (!Array.isArray(out.datasets)) out.datasets = [];
 
-  // Always align companies list to config
   out.companies = companiesCfg.companies.map(({ id, name, domain }) => ({ id, name, domain }));
-
-  // If datasets missing (shouldn't be), keep existing or leave as-is.
   out.generatedAt = out.generatedAt || new Date().toISOString();
 
   return out;
@@ -178,7 +174,6 @@ async function main() {
   for (const c of companiesCfg.companies) {
     console.log(`\nCompany: ${c.name} (${c.domain})`);
 
-    // SEMrush
     let organicTraffic = null;
     let organicKeywords = null;
 
@@ -194,7 +189,6 @@ async function main() {
       console.log(`  SEMrush failed: ${String(e?.message || e)}`);
     }
 
-    // GDELT (rate limit)
     let mentionsMonthly = null;
     try {
       mentionsMonthly = await withRetries(
@@ -207,12 +201,10 @@ async function main() {
       );
       console.log(`  GDELT mentions (last ${windowDays}d): ${mentionsMonthly}`);
     } catch (e) {
-      // IMPORTANT: don't crash the run if GDELT rate limits; store null and continue.
       console.log(`  GDELT failed (will store null): ${String(e?.message || e)}`);
       mentionsMonthly = null;
     }
 
-    // Be extra-safe on GDELT guidance ("1 request every 5 seconds")
     await sleep(7500);
 
     values[c.id] = {
