@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-03-05T12:41:13.575Z",
+  "generatedAt": "2026-03-05T12:54:20.621Z",
   "companies": [
     {
       "id": "swiis",
@@ -147,7 +147,7 @@
             "adsRunning": null
           },
           "press": {
-            "mentionsMonthly": null
+            "mentionsMonthly": 0
           }
         },
         "fca": {
@@ -223,7 +223,7 @@
             "adsRunning": null
           },
           "press": {
-            "mentionsMonthly": null
+            "mentionsMonthly": 0
           }
         },
         "orangegrove": {
