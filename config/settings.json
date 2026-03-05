@@ -9,7 +9,8 @@
   "instagram": {
     "windowDays": 30,
     "feeds": {
-      "capstone": "https://rss.app/feeds/VjmVGCTnljkpDlF6.xml"
+      "capstone": "https://rss.app/feeds/VjmVGCTnljkpDlF6.xml",
+      "NFA": "https://rss.app/feeds/UOdyXgfkm3ss8xFB.xml"
     }
   }
 }
