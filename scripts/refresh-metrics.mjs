@@ -13,6 +13,27 @@ function monthKeyUTC(d = new Date()) {
   return `${yyyy}-${mm}`;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withRetries(fn, { retries = 3, baseDelayMs = 5000 } = {}) {
+  let lastErr;
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      const delay = baseDelayMs * Math.max(1, i + 1);
+      console.log(
+        `Retry ${i + 1}/${retries + 1} after error: ${String(e?.message || e)}. Sleeping ${delay}ms...`
+      );
+      await sleep(delay);
+    }
+  }
+  throw lastErr;
+}
+
 async function readJson(p) {
   return JSON.parse(await fs.readFile(p, "utf8"));
 }
@@ -31,6 +52,14 @@ async function fetchJson(url) {
   return res.json();
 }
 
+/**
+ * SEMrush notes:
+ * This uses the SEMrush "domain_rank" endpoint as a starter.
+ * It returns organic traffic (Ot) and organic keywords (Or).
+ *
+ * Authority score and referring domains are not wired yet because SEMrush has
+ * multiple endpoints/columns depending on plan.
+ */
 async function semrushDomainRank({ apiKey, domain, database }) {
   const url =
     "https://api.semrush.com/?" +
@@ -46,6 +75,9 @@ async function semrushDomainRank({ apiKey, domain, database }) {
   if (!res.ok) throw new Error(`SEMrush error HTTP ${res.status} for ${domain}`);
   const text = await res.text();
 
+  // Expected:
+  // Dn;Ot;Or
+  // example.com;9500;1250
   const lines = text.trim().split(/\r?\n/);
   if (lines.length < 2) return { organicTraffic: null, organicKeywords: null };
 
@@ -109,42 +141,88 @@ async function main() {
   const month = monthKeyUTC(new Date());
   const metrics = await readJson(METRICS_PATH);
 
+  // Align companies list to config
   metrics.companies = companiesCfg.companies.map(({ id, name, domain }) => ({ id, name, domain }));
 
   const values = {};
 
-  for (const c of companiesCfg.companies) {
-    const seo = await semrushDomainRank({ apiKey, domain: c.domain, database });
+  console.log(`Refreshing metrics for month=${month}`);
+  console.log(`SEMrush database=${database}, Press windowDays=${windowDays}`);
+  console.log(`Companies: ${companiesCfg.companies.length}`);
 
-    const mentionsMonthly = await gdeltMentionsCount({
-      query: c.pressQuery || c.name,
-      windowDays
-    });
+  for (const c of companiesCfg.companies) {
+    console.log(`\nCompany: ${c.name} (${c.domain})`);
+
+    // SEMrush
+    let organicTraffic = null;
+    let organicKeywords = null;
+
+    try {
+      const seo = await withRetries(
+        async () => semrushDomainRank({ apiKey, domain: c.domain, database }),
+        { retries: 2, baseDelayMs: 2000 }
+      );
+      organicTraffic = seo.organicTraffic;
+      organicKeywords = seo.organicKeywords;
+      console.log(`  SEMrush: traffic=${organicTraffic}, keywords=${organicKeywords}`);
+    } catch (e) {
+      console.log(`  SEMrush failed for ${c.domain}: ${String(e?.message || e)}`);
+    }
+
+    // GDELT (rate-limited: ~1 request / 5 seconds)
+    let mentionsMonthly = null;
+    try {
+      mentionsMonthly = await withRetries(
+        async () =>
+          gdeltMentionsCount({
+            query: c.pressQuery || c.name,
+            windowDays
+          }),
+        { retries: 3, baseDelayMs: 5000 }
+      );
+      console.log(`  GDELT mentions (last ${windowDays}d): ${mentionsMonthly}`);
+    } catch (e) {
+      console.log(`  GDELT failed for query="${c.pressQuery || c.name}": ${String(e?.message || e)}`);
+      mentionsMonthly = null;
+    }
+
+    // Respect GDELT guidance: one request every 5 seconds
+    await sleep(6000);
 
     values[c.id] = {
       seo: {
-        authorityScore: null,
-        refDomains: null,
-        organicKeywords: seo.organicKeywords,
-        organicTraffic: seo.organicTraffic
+        authorityScore: null, // TODO: wire once SEMrush endpoint confirmed
+        refDomains: null,     // TODO: wire once SEMrush endpoint confirmed
+        organicKeywords,
+        organicTraffic
       },
-      instagram: { followers: null, postsMonthly: null, engagementsMonthly: null },
-      metaAds: { adsRunning: null },
-      press: { mentionsMonthly }
+      instagram: {
+        followers: null,
+        postsMonthly: null,
+        engagementsMonthly: null
+      },
+      metaAds: {
+        adsRunning: null
+      },
+      press: {
+        mentionsMonthly
+      }
     };
   }
 
+  // Upsert snapshot for this month
   const existingIdx = metrics.snapshots.findIndex((s) => s.month === month);
   const snapshot = { month, values };
 
   if (existingIdx >= 0) metrics.snapshots[existingIdx] = snapshot;
   else metrics.snapshots.push(snapshot);
 
+  // Keep snapshots sorted ascending
   metrics.snapshots.sort((a, b) => (a.month < b.month ? -1 : 1));
   metrics.generatedAt = new Date().toISOString();
 
   await writeJson(METRICS_PATH, metrics);
-  console.log(`Updated ${METRICS_PATH} for month=${month}`);
+  console.log(`\nUpdated ${METRICS_PATH} for month=${month}`);
 }
 
 main().catch((err) => {
