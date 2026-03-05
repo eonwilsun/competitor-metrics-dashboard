@@ -59,29 +59,21 @@ async function fetchJsonLenient(url) {
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}\n${text}`);
   try {
     return JSON.parse(text);
-  } catch (e) {
-    // GDELT sometimes returns plain text like "Queries co..."
+  } catch {
     throw new Error(`Non-JSON response for ${url}\n${text.slice(0, 200)}`);
   }
 }
 
 function pickDatabaseOrder(domain, defaultDb) {
-  // Try sensible defaults:
-  // - .co.uk / .org.uk -> uk first
-  // - .com -> us first
   const d = (domain || "").toLowerCase();
   const isUk = d.endsWith(".co.uk") || d.endsWith(".org.uk") || d.endsWith(".ac.uk");
   const isCom = d.endsWith(".com");
-
   if (isCom) return ["us", defaultDb].filter(Boolean);
   if (isUk) return [defaultDb || "uk", "us"].filter(Boolean);
-
   return [defaultDb || "uk", "us"].filter(Boolean);
 }
 
 function parseSemrushDomainRank(text) {
-  // SEMrush returns ; separated by default
-  // Handle common "ERROR" outputs
   const t = (text || "").trim();
   if (!t) return { organicTraffic: null, organicKeywords: null, error: "Empty SEMrush response" };
   if (/^ERROR/i.test(t)) return { organicTraffic: null, organicKeywords: null, error: t };
@@ -94,7 +86,6 @@ function parseSemrushDomainRank(text) {
   const headers = lines[0].split(";");
   const values = lines[1].split(";");
 
-  // Our requested columns: Dn,Ot,Or
   const idxOt = headers.indexOf("Ot");
   const idxOr = headers.indexOf("Or");
 
@@ -104,7 +95,9 @@ function parseSemrushDomainRank(text) {
   return {
     organicTraffic: Number.isFinite(organicTraffic) ? organicTraffic : null,
     organicKeywords: Number.isFinite(organicKeywords) ? organicKeywords : null,
-    error: null
+    error: null,
+    rawFirstLine: lines[0].slice(0, 200),
+    rawSecondLine: lines[1].slice(0, 200)
   };
 }
 
@@ -120,14 +113,18 @@ async function semrushDomainRank({ apiKey, domain, database }) {
     }).toString();
 
   const text = await fetchText(url);
-  const parsed = parseSemrushDomainRank(text);
+  return parseSemrushDomainRank(text);
+}
 
-  // Help debug: show first part only (no API key leaked)
-  if (parsed.error) {
-    console.log(`  SEMrush raw (first 120): ${text.trim().slice(0, 120)}`);
+function gdeltWrapOrQuery(q) {
+  // GDELT error says: "Queries containing OR'd terms must be surrounded by ()."
+  // So if the query contains OR, wrap the whole thing.
+  if (!q) return q;
+  const trimmed = q.trim();
+  if (/\sOR\s/i.test(trimmed) && !(trimmed.startsWith("(") && trimmed.endsWith(")"))) {
+    return `(${trimmed})`;
   }
-
-  return parsed;
+  return trimmed;
 }
 
 async function gdeltMentionsCount({ query, windowDays }) {
@@ -146,10 +143,12 @@ async function gdeltMentionsCount({ query, windowDays }) {
     );
   };
 
+  const safeQuery = gdeltWrapOrQuery(query);
+
   const url =
     "https://api.gdeltproject.org/api/v2/doc/doc?" +
     new URLSearchParams({
-      query,
+      query: safeQuery,
       mode: "timelinevolraw",
       format: "json",
       startdatetime: fmt(start),
@@ -206,7 +205,6 @@ async function main() {
   for (const c of companiesCfg.companies) {
     console.log(`\nCompany: ${c.name} (${c.domain})`);
 
-    // SEMrush (try multiple DBs)
     let organicTraffic = null;
     let organicKeywords = null;
 
@@ -218,24 +216,24 @@ async function main() {
           { retries: 1, baseDelayMs: 2000 }
         );
 
-        if (res.error) {
-          console.log(`  SEMrush (${db}) parse/error: ${res.error.slice(0, 120)}`);
-          continue;
-        }
-
         organicTraffic = res.organicTraffic;
         organicKeywords = res.organicKeywords;
 
         console.log(`  SEMrush (${db}): traffic=${organicTraffic}, keywords=${organicKeywords}`);
 
-        // If we got any non-null values, accept and stop
-        if (organicTraffic !== null || organicKeywords !== null) break;
+        // If still null, print the two CSV lines so we can see what SEMrush actually returned
+        if (organicTraffic === null && organicKeywords === null) {
+          console.log(`  SEMrush (${db}) CSV header: ${res.rawFirstLine || ""}`);
+          console.log(`  SEMrush (${db}) CSV row:    ${res.rawSecondLine || ""}`);
+        } else {
+          break;
+        }
       } catch (e) {
         console.log(`  SEMrush (${db}) failed: ${String(e?.message || e)}`);
       }
     }
 
-    // GDELT (be conservative)
+    // GDELT — store 0 on failure to keep dashboard stable
     let mentionsMonthly = 0;
     try {
       mentionsMonthly = await withRetries(
@@ -244,12 +242,10 @@ async function main() {
       );
       console.log(`  GDELT mentions (last ${windowDays}d): ${mentionsMonthly}`);
     } catch (e) {
-      // Store 0 instead of null to keep charts stable
       console.log(`  GDELT failed (storing 0): ${String(e?.message || e)}`);
       mentionsMonthly = 0;
     }
 
-    // hard spacing between GDELT calls
     await sleep(11000);
 
     values[c.id] = {
