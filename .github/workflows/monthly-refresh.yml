@@ -30,7 +30,6 @@ jobs:
       - name: Refresh metrics.json
         env:
           SEMRUSH_API_KEY: ${{ secrets.SEMRUSH_API_KEY }}
-          # Optional: only needed if Instagram blocks no-login scraping
           IG_SESSION_JSON: ${{ secrets.IG_SESSION_JSON }}
         run: node scripts/refresh-metrics.mjs
 

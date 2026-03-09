@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { scrapeInstagramProfile } from "./instagram-scrape-playwright.mjs";
 
 const ROOT = process.cwd();
 
@@ -159,88 +160,19 @@ async function gdeltMentionsCount({ query, windowDays }) {
   return total || 0;
 }
 
-// --- Instagram (RSS.app) helpers (no external deps) ---
+// --- Instagram (Playwright) helpers ---
 
-function decodeXmlEntities(s) {
-  return (s || "")
-    .replaceAll("&lt;", "<")
-    .replaceAll("&gt;", ">")
-    .replaceAll("&amp;", "&")
-    .replaceAll("&quot;", '"')
-    .replaceAll("&apos;", "'");
-}
-
-function stripCdata(s) {
-  const m = (s || "").match(/^<!\[CDATA\[(.*)\]\]>$/s);
-  return m ? m[1] : s;
-}
-
-function firstMatch(xml, regex) {
-  const m = xml.match(regex);
-  return m ? m[1] : null;
-}
-
-function parseRssItems(xml) {
-  const out = [];
-  if (!xml) return out;
-
-  const itemRegex = /<item\b[^>]*>([\s\S]*?)<\/item>/gi;
-  let m;
-  while ((m = itemRegex.exec(xml))) {
-    const itemXml = m[1];
-
-    const pubDateRaw =
-      firstMatch(itemXml, /<pubDate>([\s\S]*?)<\/pubDate>/i) ??
-      firstMatch(itemXml, /<dc:date>([\s\S]*?)<\/dc:date>/i) ??
-      firstMatch(itemXml, /<published>([\s\S]*?)<\/published>/i) ??
-      firstMatch(itemXml, /<updated>([\s\S]*?)<\/updated>/i);
-
-    const pubDateStr = decodeXmlEntities(stripCdata((pubDateRaw || "").trim()));
-    const pubDate = pubDateStr ? new Date(pubDateStr) : null;
-
-    out.push({ pubDate });
-  }
-
-  return out;
-}
-
-function countItemsInWindow(items, windowDays) {
+function countPostsInWindowFromDatetimes(posts, windowDays) {
   const now = Date.now();
   const start = now - windowDays * 24 * 60 * 60 * 1000;
 
   let count = 0;
-  for (const it of items) {
-    const t = it?.pubDate instanceof Date ? it.pubDate.getTime() : NaN;
+  for (const p of posts || []) {
+    const t = Date.parse(p?.datetime || "");
     if (!Number.isFinite(t)) continue;
     if (t >= start && t <= now) count++;
   }
   return count;
-}
-
-function parseFollowersFromChannelDescription(xml) {
-  // Example in your feed:
-  // <description><![CDATA[ 2,338 Followers - Capstone Foster Care (@capstonefostercare) ]]></description>
-  const descRaw = firstMatch(xml, /<channel\b[^>]*>[\s\S]*?<description>([\s\S]*?)<\/description>/i);
-  const desc = decodeXmlEntities(stripCdata((descRaw || "").trim()));
-  if (!desc) return null;
-
-  const m = desc.match(/([\d,]+)\s+Followers/i);
-  if (!m) return null;
-
-  const n = Number(String(m[1]).replaceAll(",", ""));
-  return Number.isFinite(n) ? n : null;
-}
-
-async function instagramMetricsFromRss({ feedUrl, windowDays }) {
-  if (!feedUrl) return { followers: null, postsMonthly: null };
-
-  const xml = await fetchText(feedUrl);
-
-  const followers = parseFollowersFromChannelDescription(xml);
-  const items = parseRssItems(xml);
-  const postsMonthly = countItemsInWindow(items, windowDays);
-
-  return { followers, postsMonthly };
 }
 
 function normalizeMetricsShape(metrics, companiesCfg) {
@@ -258,6 +190,8 @@ async function main() {
   const apiKey = process.env.SEMRUSH_API_KEY;
   if (!apiKey) throw new Error("Missing SEMRUSH_API_KEY env var.");
 
+  const cookiesJson = process.env.IG_SESSION_JSON || "";
+
   const companiesCfg = await readJsonSafe(COMPANIES_PATH, { companies: [] });
   if (!Array.isArray(companiesCfg.companies) || companiesCfg.companies.length === 0) {
     throw new Error("config/companies.json is missing or has no companies.");
@@ -267,9 +201,12 @@ async function main() {
   const defaultDb = settings?.semrush?.database || "uk";
   const windowDays = settings?.press?.windowDays ?? 30;
 
-  const igWindowDays = settings?.instagram?.windowDays ?? 30;
-  const igFeeds =
-    settings?.instagram?.feeds && typeof settings.instagram.feeds === "object" ? settings.instagram.feeds : {};
+  const igEnabled = settings?.instagramScrape?.enabled === true;
+  const igWindowDays = settings?.instagramScrape?.windowDays ?? 30;
+  const igUsernames =
+    settings?.instagramScrape?.usernames && typeof settings.instagramScrape.usernames === "object"
+      ? settings.instagramScrape.usernames
+      : {};
 
   const month = monthKeyUTC(new Date());
 
@@ -281,12 +218,11 @@ async function main() {
   });
 
   const metrics = normalizeMetricsShape(metricsRaw, companiesCfg);
-
   const values = {};
 
   console.log(`Refreshing metrics for month=${month}`);
   console.log(`SEMrush defaultDb=${defaultDb}, Press windowDays=${windowDays}`);
-  console.log(`Instagram windowDays=${igWindowDays}, feedsConfigured=${Object.keys(igFeeds).length}`);
+  console.log(`Instagram enabled=${igEnabled}, windowDays=${igWindowDays}, usernamesConfigured=${Object.keys(igUsernames).length}`);
   console.log(`Companies: ${companiesCfg.companies.length}`);
 
   for (const c of companiesCfg.companies) {
@@ -314,29 +250,33 @@ async function main() {
       }
     }
 
-    // Instagram (RSS.app)
+    // Instagram (Playwright)
     let instagramFollowers = null;
     let instagramPostsMonthly = null;
 
-    const feedUrl = igFeeds?.[c.id] || null;
-    if (feedUrl) {
+    const username = igUsernames?.[c.id] || null;
+    if (igEnabled && username) {
       try {
-        const ig = await withRetries(async () => instagramMetricsFromRss({ feedUrl, windowDays: igWindowDays }), {
-          retries: 2,
-          baseDelayMs: 3000
+        const ig = await withRetries(async () => scrapeInstagramProfile({ username, cookiesJson }), {
+          retries: 1,
+          baseDelayMs: 5000
         });
-        instagramFollowers = ig.followers;
-        instagramPostsMonthly = ig.postsMonthly;
+        instagramFollowers = ig.followers ?? null;
+        instagramPostsMonthly = countPostsInWindowFromDatetimes(ig.posts, igWindowDays);
+
         console.log(
-          `  Instagram RSS: followers=${instagramFollowers ?? "null"}, posts(last ${igWindowDays}d)=${instagramPostsMonthly ?? "null"}`
+          `  Instagram: followers=${instagramFollowers ?? "null"}, posts(last ${igWindowDays}d)=${instagramPostsMonthly ?? "null"}`
         );
       } catch (e) {
-        console.log(`  Instagram RSS failed (storing nulls): ${String(e?.message || e)}`);
+        // If this is an auth error, we want the workflow to fail loudly so you know to add cookies.
+        if (String(e?.message || e).includes("INSTAGRAM_AUTH_ERROR")) throw e;
+
+        console.log(`  Instagram failed (storing nulls): ${String(e?.message || e)}`);
         instagramFollowers = null;
         instagramPostsMonthly = null;
       }
     } else {
-      console.log("  Instagram RSS: no feed configured (storing nulls)");
+      console.log("  Instagram: not configured (storing nulls)");
     }
 
     // GDELT
@@ -381,6 +321,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(err);
+  console.error(String(err?.message || err));
   process.exit(1);
 });
