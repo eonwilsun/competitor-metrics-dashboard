@@ -189,6 +189,128 @@ function refresh() {
   mount.appendChild(buildTable(data, months, companies, datasets));
 }
 
+// -----------------------
+// Export helpers (all data)
+// -----------------------
+function toExportRowsAllData(data) {
+  const companiesById = new Map(data.companies.map(c => [c.id, c]));
+  const datasetsById = new Map(data.datasets.map(d => [d.id, d]));
+  const metricByDataset = new Map(
+    data.datasets.map(d => [d.id, new Map(d.metrics.map(m => [m.id, m]))])
+  );
+
+  const rows = [];
+  for (const snap of data.snapshots) {
+    const month = snap.month;
+    const values = snap.values || {};
+
+    for (const [companyId, companyValues] of Object.entries(values)) {
+      const company = companiesById.get(companyId) || { id: companyId, name: companyId, domain: "" };
+
+      for (const [datasetId, datasetValues] of Object.entries(companyValues || {})) {
+        const dataset = datasetsById.get(datasetId) || { id: datasetId, name: datasetId, metrics: [] };
+        const metricsMap = metricByDataset.get(datasetId) || new Map();
+
+        for (const [metricId, value] of Object.entries(datasetValues || {})) {
+          const metric = metricsMap.get(metricId) || { id: metricId, label: metricId, format: "" };
+
+          rows.push({
+            month,
+            companyId,
+            companyName: company.name,
+            domain: company.domain || "",
+            datasetId,
+            datasetName: dataset.name,
+            metricId,
+            metricLabel: metric.label,
+            value: value === undefined ? null : value
+          });
+        }
+      }
+    }
+  }
+
+  // Stable sorting helps when comparing exports
+  rows.sort((a, b) =>
+    a.month.localeCompare(b.month) ||
+    a.companyId.localeCompare(b.companyId) ||
+    a.datasetId.localeCompare(b.datasetId) ||
+    a.metricId.localeCompare(b.metricId)
+  );
+
+  return rows;
+}
+
+function csvEscape(value) {
+  if (value === null || value === undefined) return "";
+  const s = String(value);
+  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function downloadBlob(filename, mime, content) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportAllToCsv(data) {
+  const rows = toExportRowsAllData(data);
+  const headers = [
+    "month",
+    "companyId",
+    "companyName",
+    "domain",
+    "datasetId",
+    "datasetName",
+    "metricId",
+    "metricLabel",
+    "value"
+  ];
+
+  const lines = [];
+  lines.push(headers.join(","));
+  for (const r of rows) {
+    lines.push(headers.map(h => csvEscape(r[h])).join(","));
+  }
+
+  const exportTime = new Date().toISOString().replace(/[:.]/g, "-");
+  downloadBlob(`competitor-metrics-${exportTime}.csv`, "text/csv;charset=utf-8", lines.join("\n"));
+}
+
+function exportAllToXlsx(data) {
+  if (!window.XLSX) {
+    alert("Excel export library failed to load. Try refreshing the page.");
+    return;
+  }
+
+  const rows = toExportRowsAllData(data);
+
+  const meta = [
+    { key: "generatedAt", value: data.generatedAt || "" },
+    { key: "exportTime", value: new Date().toISOString() },
+    { key: "ui.timeRange", value: state.timeRange },
+    { key: "ui.selectedCompanies", value: Array.from(state.selectedCompanies).join(",") },
+    { key: "ui.selectedDatasets", value: Array.from(state.selectedDatasets).join(",") }
+  ];
+
+  const wb = XLSX.utils.book_new();
+  const wsData = XLSX.utils.json_to_sheet(rows);
+  XLSX.utils.book_append_sheet(wb, wsData, "data");
+
+  const wsMeta = XLSX.utils.json_to_sheet(meta);
+  XLSX.utils.book_append_sheet(wb, wsMeta, "metadata");
+
+  const exportTime = new Date().toISOString().replace(/[:.]/g, "-");
+  XLSX.writeFile(wb, `competitor-metrics-${exportTime}.xlsx`);
+}
+
 async function init() {
   const data = await loadData();
 
@@ -227,6 +349,16 @@ async function init() {
     state.selectedDatasets.clear();
     renderToggles(datasetToggle, data.datasets, state.selectedDatasets, (d) => d.name);
     refresh();
+  });
+
+  document.getElementById("exportCsv").addEventListener("click", async () => {
+    const d = await loadData();
+    exportAllToCsv(d);
+  });
+
+  document.getElementById("exportXlsx").addEventListener("click", async () => {
+    const d = await loadData();
+    exportAllToXlsx(d);
   });
 
   refresh();
