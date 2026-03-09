@@ -109,7 +109,6 @@ function buildTable(data, months, companies, datasets) {
   table.appendChild(thead);
 
   const tbody = el("tbody");
-
   const singleMonth = months.length === 1;
 
   for (const company of companies) {
@@ -162,35 +161,120 @@ function getLatestMonth(data) {
   return months[months.length - 1]; // last ascending
 }
 
-function refresh() {
-  const data = cachedData;
-  const latestMonth = getLatestMonth(data);
-  const months = getRangeMonths(latestMonth, state.timeRange);
+// -----------------------
+// Notes (company x month) stored in localStorage
+// -----------------------
+const NOTES_STORAGE_KEY = "competitorMetricsNotes.v1";
 
-  document.getElementById("lastUpdated").textContent =
-    `Sample data loaded. Latest month in dataset: ${latestMonth}. Showing: ${months.join(", ")}.`;
+function loadNotesState() {
+  try {
+    const raw = localStorage.getItem(NOTES_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    return parsed;
+  } catch {
+    return {};
+  }
+}
 
-  const companies = data.companies.filter(c => state.selectedCompanies.has(c.id));
-  const datasets = data.datasets.filter(d => state.selectedDatasets.has(d.id));
+function saveNotesState(notesObj) {
+  localStorage.setItem(NOTES_STORAGE_KEY, JSON.stringify(notesObj));
+}
 
-  const mount = document.getElementById("metricsDisplay");
-  mount.innerHTML = "";
+function getNote(notesObj, month, companyId) {
+  return notesObj?.[month]?.[companyId] ?? "";
+}
 
-  if (companies.length === 0) {
-    mount.appendChild(el("p", { className: "muted", text: "No companies selected." }));
-    return;
+function setNote(notesObj, month, companyId, value) {
+  if (!notesObj[month]) notesObj[month] = {};
+  notesObj[month][companyId] = value;
+}
+
+function deleteNote(notesObj, month, companyId) {
+  if (!notesObj[month]) return;
+  delete notesObj[month][companyId];
+  if (Object.keys(notesObj[month]).length === 0) delete notesObj[month];
+}
+
+function buildNotesTable(data, months) {
+  const companies = data.companies || [];
+  const notesObj = loadNotesState();
+
+  const table = el("table");
+  const thead = el("thead");
+  const trh = el("tr");
+
+  trh.appendChild(el("th", { text: "Company" }));
+  for (const m of months) trh.appendChild(el("th", { text: m }));
+  thead.appendChild(trh);
+  table.appendChild(thead);
+
+  const tbody = el("tbody");
+
+  for (const c of companies) {
+    const tr = el("tr");
+    tr.appendChild(el("td", {}, [
+      el("div", { text: c.name }),
+      el("div", { className: "muted", text: c.id })
+    ]));
+
+    for (const m of months) {
+      const cell = el("td");
+      const textarea = el("textarea", {
+        "data-month": m,
+        "data-company": c.id,
+        rows: "3",
+        style: "width: 100%; min-width: 180px; resize: vertical;"
+      });
+      textarea.value = getNote(notesObj, m, c.id);
+
+      // Save on blur to keep it simple
+      textarea.addEventListener("blur", () => {
+        const notes = loadNotesState();
+        const v = textarea.value.trim();
+        if (!v) deleteNote(notes, m, c.id);
+        else setNote(notes, m, c.id, v);
+        saveNotesState(notes);
+      });
+
+      cell.appendChild(textarea);
+      tr.appendChild(cell);
+    }
+
+    tbody.appendChild(tr);
   }
 
-  if (datasets.length === 0) {
-    mount.appendChild(el("p", { className: "muted", text: "No datasets selected." }));
-    return;
+  table.appendChild(tbody);
+  return table;
+}
+
+function exportNotesToCsv(data, months) {
+  const notes = loadNotesState();
+  const headers = ["month", "companyId", "companyName", "note"];
+
+  const lines = [];
+  lines.push(headers.join(","));
+
+  for (const m of months) {
+    for (const c of (data.companies || [])) {
+      const note = getNote(notes, m, c.id);
+      if (!note) continue;
+      lines.push([
+        csvEscape(m),
+        csvEscape(c.id),
+        csvEscape(c.name || c.id),
+        csvEscape(note)
+      ].join(","));
+    }
   }
 
-  mount.appendChild(buildTable(data, months, companies, datasets));
+  const exportTime = new Date().toISOString().replace(/[:.]/g, "-");
+  downloadBlob(`competitor-notes-${exportTime}.csv`, "text/csv;charset=utf-8", lines.join("\n"));
 }
 
 // -----------------------
-// Export (matrix layout like your Google Sheet)
+// Export (matrix report like your Google Sheet)
 // -----------------------
 function monthLabel(yyyyMm) {
   const [y, m] = yyyyMm.split("-").map(Number);
@@ -209,7 +293,6 @@ function getAllMonthsSorted(data) {
 }
 
 function datasetSectionTitle(datasetId, datasetName) {
-  // Friendly section headings similar to your sheet
   if (datasetId === "seo") return "Website";
   if (datasetId === "instagram") return "Organic Social Media";
   if (datasetId === "metaAds") return "Paid Social Media";
@@ -223,16 +306,12 @@ function getValueFor(data, month, companyId, datasetId, metricId) {
 }
 
 function buildMatrixRows(data) {
-  // Matrix uses ALL months, ALL companies, ALL datasets/metrics (ignores UI filters)
+  // Matrix uses ALL months, ALL companies, ALL datasets/metrics
   const months = getAllMonthsSorted(data);
   const companies = data.companies || [];
   const datasets = data.datasets || [];
 
-  // Header rows (similar to your screenshot)
-  // Row 1: year (repeated across month columns; Excel formatting will merge visually)
-  // Row 2: month names
   const years = months.map(monthYear);
-
   const headerYear = ["", ""].concat(years);
   const headerMonth = ["", ""].concat(months.map(monthLabel));
 
@@ -240,7 +319,6 @@ function buildMatrixRows(data) {
   rows.push(headerYear);
   rows.push(headerMonth);
 
-  // Build sections: dataset -> metrics -> company rows
   for (const ds of datasets) {
     const sectionTitle = datasetSectionTitle(ds.id, ds.name);
 
@@ -248,12 +326,11 @@ function buildMatrixRows(data) {
     rows.push([sectionTitle, ""].concat(months.map(() => "")));
 
     for (const metric of ds.metrics || []) {
-      // Metric block: one row per company
       for (let i = 0; i < companies.length; i++) {
         const c = companies[i];
         const metricLabel = metric.label || metric.id;
 
-        const rowMetricCell = i === 0 ? metricLabel : ""; // mimic merged cells
+        const rowMetricCell = i === 0 ? metricLabel : "";
         const rowCompanyCell = c.name || c.id;
 
         const monthValues = months.map(m => {
@@ -264,7 +341,6 @@ function buildMatrixRows(data) {
         rows.push([rowMetricCell, rowCompanyCell].concat(monthValues));
       }
 
-      // Blank spacer row between metric blocks (like your sheet’s breathing room)
       rows.push(["", ""].concat(months.map(() => "")));
     }
   }
@@ -307,26 +383,70 @@ function exportMatrixToXlsx(data) {
   const { rows, months } = buildMatrixRows(data);
 
   const wb = XLSX.utils.book_new();
+
+  // Report sheet
   const ws = XLSX.utils.aoa_to_sheet(rows);
 
-  // Basic column widths: Metric, Company, then months
-  const cols = [
-    { wch: 32 }, // Metric label
+  ws["!cols"] = [
+    { wch: 36 }, // Metric label
     { wch: 18 }  // Company
   ].concat(months.map(() => ({ wch: 18 })));
-  ws["!cols"] = cols;
 
-  // Freeze top 2 rows and first 2 columns (like a report)
   ws["!freeze"] = { xSplit: 2, ySplit: 2, topLeftCell: "C3", activePane: "bottomRight", state: "frozen" };
-
-  // Styling (best-effort; SheetJS community build has limited style support).
-  // We'll at least bold the first two rows by setting cell types/values; real fills require xlsx-style.
-  // Still produces correct structure even without colors.
-
   XLSX.utils.book_append_sheet(wb, ws, "Report");
+
+  // Notes sheet (ALL notes stored, regardless of current view)
+  const notes = loadNotesState();
+  const allMonths = getAllMonthsSorted(data);
+  const notesHeader = ["Company"].concat(allMonths);
+  const notesRows = [notesHeader];
+
+  for (const c of (data.companies || [])) {
+    const row = [c.name || c.id];
+    for (const m of allMonths) row.push(getNote(notes, m, c.id) || "");
+    notesRows.push(row);
+  }
+
+  const wsNotes = XLSX.utils.aoa_to_sheet(notesRows);
+  wsNotes["!cols"] = [{ wch: 22 }].concat(allMonths.map(() => ({ wch: 30 })));
+  XLSX.utils.book_append_sheet(wb, wsNotes, "Notes");
 
   const exportTime = new Date().toISOString().replace(/[:.]/g, "-");
   XLSX.writeFile(wb, `competitor-metrics-matrix-${exportTime}.xlsx`);
+}
+
+function refreshNotes(data) {
+  const latestMonth = getLatestMonth(data);
+  const months = getRangeMonths(latestMonth, state.timeRange);
+
+  const mount = document.getElementById("notesDisplay");
+  mount.innerHTML = "";
+  mount.appendChild(buildNotesTable(data, months));
+}
+
+function refresh() {
+  const data = cachedData;
+  const latestMonth = getLatestMonth(data);
+  const months = getRangeMonths(latestMonth, state.timeRange);
+
+  document.getElementById("lastUpdated").textContent =
+    `Sample data loaded. Latest month in dataset: ${latestMonth}. Showing: ${months.join(", ")}.`;
+
+  const companies = data.companies.filter(c => state.selectedCompanies.has(c.id));
+  const datasets = data.datasets.filter(d => state.selectedDatasets.has(d.id));
+
+  const mount = document.getElementById("metricsDisplay");
+  mount.innerHTML = "";
+
+  if (companies.length === 0) {
+    mount.appendChild(el("p", { className: "muted", text: "No companies selected." }));
+  } else if (datasets.length === 0) {
+    mount.appendChild(el("p", { className: "muted", text: "No datasets selected." }));
+  } else {
+    mount.appendChild(buildTable(data, months, companies, datasets));
+  }
+
+  refreshNotes(data);
 }
 
 async function init() {
@@ -369,7 +489,7 @@ async function init() {
     refresh();
   });
 
-  // Export buttons: matrix-style report (all data)
+  // Export buttons
   document.getElementById("exportCsv").addEventListener("click", async () => {
     const d = await loadData();
     exportMatrixToCsv(d);
@@ -378,6 +498,26 @@ async function init() {
   document.getElementById("exportXlsx").addEventListener("click", async () => {
     const d = await loadData();
     exportMatrixToXlsx(d);
+  });
+
+  document.getElementById("exportNotesCsv").addEventListener("click", async () => {
+    const d = await loadData();
+    const latestMonth = getLatestMonth(d);
+    const months = getRangeMonths(latestMonth, state.timeRange);
+    exportNotesToCsv(d, months);
+  });
+
+  document.getElementById("notesClearVisible").addEventListener("click", async () => {
+    const d = await loadData();
+    const latestMonth = getLatestMonth(d);
+    const months = getRangeMonths(latestMonth, state.timeRange);
+    const notes = loadNotesState();
+
+    for (const m of months) {
+      for (const c of (d.companies || [])) deleteNote(notes, m, c.id);
+    }
+    saveNotesState(notes);
+    refreshNotes(d);
   });
 
   refresh();
