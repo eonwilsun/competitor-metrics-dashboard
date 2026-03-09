@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-03-09T09:59:35.975Z",
+  "generatedAt": "2026-03-09T13:12:57.245Z",
   "companies": [
     {
       "id": "swiis",
@@ -139,8 +139,8 @@
             "organicTraffic": 747
           },
           "instagram": {
-            "followers": 5484,
-            "postsMonthly": 9,
+            "followers": null,
+            "postsMonthly": null,
             "engagementsMonthly": null
           },
           "metaAds": {
@@ -196,8 +196,8 @@
             "organicTraffic": 4625
           },
           "instagram": {
-            "followers": 2346,
-            "postsMonthly": 12,
+            "followers": null,
+            "postsMonthly": null,
             "engagementsMonthly": null
           },
           "metaAds": {
