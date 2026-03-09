@@ -41,6 +41,17 @@
       </div>
       <div id="datasetToggle" class="toggle-grid"></div>
     </div>
+
+    <div class="control-block">
+      <h2>Export</h2>
+      <div class="control-actions">
+        <button id="exportCsv" type="button">Download CSV</button>
+        <button id="exportXlsx" type="button">Download Excel (.xlsx)</button>
+      </div>
+      <p class="muted" style="margin-top: 8px;">
+        Exports all months & all companies/datasets from <code>data/metrics.json</code>.
+      </p>
+    </div>
   </section>
 
   <main class="main">
@@ -50,6 +61,8 @@
     </section>
   </main>
 
+  <!-- SheetJS for Excel export -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="assets/app.js"></script>
 </body>
 </html>
