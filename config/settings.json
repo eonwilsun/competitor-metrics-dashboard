@@ -6,11 +6,12 @@
     "windowDays": 30,
     "mode": "gdelt"
   },
-  "instagram": {
+  "instagramScrape": {
+    "enabled": true,
     "windowDays": 30,
-    "feeds": {
-      "capstone": "https://rss.app/feeds/VjmVGCTnljkpDlF6.xml",
-      "nfa": "https://rss.app/feeds/UOdyXgfkm3ss8xFB.xml"
+    "usernames": {
+      "capstone": "capstonefostercare",
+      "nfa": "nfa_fostering"
     }
   }
 }
