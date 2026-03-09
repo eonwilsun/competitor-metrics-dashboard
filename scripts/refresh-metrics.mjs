@@ -316,8 +316,12 @@ async function main() {
   metrics.snapshots.sort((a, b) => (a.month < b.month ? -1 : 1));
   metrics.generatedAt = new Date().toISOString();
 
-  await writeJson(METRICS_PATH, metrics);
-  console.log(`\nUpdated ${METRICS_PATH} for month=${month}`);
+await writeJson(METRICS_PATH, metrics);
+console.log(`\nUpdated ${METRICS_PATH} for month=${month}`);
+
+// In GitHub Actions, some libraries (e.g. Playwright) can keep the Node event loop alive.
+// Exiting explicitly prevents the workflow from hanging after the work is done.
+process.exit(0);
 }
 
 main().catch((err) => {
