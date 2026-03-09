@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-03-05T16:13:07.734Z",
+  "generatedAt": "2026-03-09T09:59:35.975Z",
   "companies": [
     {
       "id": "swiis",
@@ -116,8 +116,8 @@
           "seo": {
             "authorityScore": null,
             "refDomains": null,
-            "organicKeywords": 368,
-            "organicTraffic": 169
+            "organicKeywords": 361,
+            "organicTraffic": 141
           },
           "instagram": {
             "followers": null,
@@ -135,12 +135,12 @@
           "seo": {
             "authorityScore": null,
             "refDomains": null,
-            "organicKeywords": 596,
-            "organicTraffic": 440
+            "organicKeywords": 770,
+            "organicTraffic": 747
           },
           "instagram": {
-            "followers": null,
-            "postsMonthly": null,
+            "followers": 5484,
+            "postsMonthly": 9,
             "engagementsMonthly": null
           },
           "metaAds": {
@@ -154,8 +154,8 @@
           "seo": {
             "authorityScore": null,
             "refDomains": null,
-            "organicKeywords": 2803,
-            "organicTraffic": 5642
+            "organicKeywords": 2875,
+            "organicTraffic": 6073
           },
           "instagram": {
             "followers": null,
@@ -173,8 +173,8 @@
           "seo": {
             "authorityScore": null,
             "refDomains": null,
-            "organicKeywords": 3024,
-            "organicTraffic": 1184
+            "organicKeywords": 2941,
+            "organicTraffic": 1259
           },
           "instagram": {
             "followers": null,
@@ -192,12 +192,12 @@
           "seo": {
             "authorityScore": null,
             "refDomains": null,
-            "organicKeywords": 2502,
-            "organicTraffic": 4600
+            "organicKeywords": 2526,
+            "organicTraffic": 4625
           },
           "instagram": {
-            "followers": 2338,
-            "postsMonthly": 6,
+            "followers": 2346,
+            "postsMonthly": 12,
             "engagementsMonthly": null
           },
           "metaAds": {
@@ -211,8 +211,8 @@
           "seo": {
             "authorityScore": null,
             "refDomains": null,
-            "organicKeywords": 1247,
-            "organicTraffic": 3028
+            "organicKeywords": 1253,
+            "organicTraffic": 2860
           },
           "instagram": {
             "followers": null,
@@ -230,8 +230,8 @@
           "seo": {
             "authorityScore": null,
             "refDomains": null,
-            "organicKeywords": 1304,
-            "organicTraffic": 534
+            "organicKeywords": 1326,
+            "organicTraffic": 640
           },
           "instagram": {
             "followers": null,
