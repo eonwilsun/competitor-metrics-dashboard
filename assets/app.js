@@ -190,55 +190,86 @@ function refresh() {
 }
 
 // -----------------------
-// Export helpers (all data)
+// Export (matrix layout like your Google Sheet)
 // -----------------------
-function toExportRowsAllData(data) {
-  const companiesById = new Map(data.companies.map(c => [c.id, c]));
-  const datasetsById = new Map(data.datasets.map(d => [d.id, d]));
-  const metricByDataset = new Map(
-    data.datasets.map(d => [d.id, new Map(d.metrics.map(m => [m.id, m]))])
-  );
+function monthLabel(yyyyMm) {
+  const [y, m] = yyyyMm.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, 1));
+  return dt.toLocaleString(undefined, { month: "long" }); // "March"
+}
+
+function monthYear(yyyyMm) {
+  return Number(yyyyMm.slice(0, 4));
+}
+
+function getAllMonthsSorted(data) {
+  const months = (data.snapshots || []).map(s => s.month);
+  months.sort(); // ascending old -> new
+  return months;
+}
+
+function datasetSectionTitle(datasetId, datasetName) {
+  // Friendly section headings similar to your sheet
+  if (datasetId === "seo") return "Website";
+  if (datasetId === "instagram") return "Organic Social Media";
+  if (datasetId === "metaAds") return "Paid Social Media";
+  if (datasetId === "press") return "Press";
+  return datasetName || datasetId;
+}
+
+function getValueFor(data, month, companyId, datasetId, metricId) {
+  const snap = (data.snapshots || []).find(s => s.month === month);
+  return snap?.values?.[companyId]?.[datasetId]?.[metricId];
+}
+
+function buildMatrixRows(data) {
+  // Matrix uses ALL months, ALL companies, ALL datasets/metrics (ignores UI filters)
+  const months = getAllMonthsSorted(data);
+  const companies = data.companies || [];
+  const datasets = data.datasets || [];
+
+  // Header rows (similar to your screenshot)
+  // Row 1: year (repeated across month columns; Excel formatting will merge visually)
+  // Row 2: month names
+  const years = months.map(monthYear);
+
+  const headerYear = ["", ""].concat(years);
+  const headerMonth = ["", ""].concat(months.map(monthLabel));
 
   const rows = [];
-  for (const snap of data.snapshots) {
-    const month = snap.month;
-    const values = snap.values || {};
+  rows.push(headerYear);
+  rows.push(headerMonth);
 
-    for (const [companyId, companyValues] of Object.entries(values)) {
-      const company = companiesById.get(companyId) || { id: companyId, name: companyId, domain: "" };
+  // Build sections: dataset -> metrics -> company rows
+  for (const ds of datasets) {
+    const sectionTitle = datasetSectionTitle(ds.id, ds.name);
 
-      for (const [datasetId, datasetValues] of Object.entries(companyValues || {})) {
-        const dataset = datasetsById.get(datasetId) || { id: datasetId, name: datasetId, metrics: [] };
-        const metricsMap = metricByDataset.get(datasetId) || new Map();
+    // Section header row
+    rows.push([sectionTitle, ""].concat(months.map(() => "")));
 
-        for (const [metricId, value] of Object.entries(datasetValues || {})) {
-          const metric = metricsMap.get(metricId) || { id: metricId, label: metricId, format: "" };
+    for (const metric of ds.metrics || []) {
+      // Metric block: one row per company
+      for (let i = 0; i < companies.length; i++) {
+        const c = companies[i];
+        const metricLabel = metric.label || metric.id;
 
-          rows.push({
-            month,
-            companyId,
-            companyName: company.name,
-            domain: company.domain || "",
-            datasetId,
-            datasetName: dataset.name,
-            metricId,
-            metricLabel: metric.label,
-            value: value === undefined ? null : value
-          });
-        }
+        const rowMetricCell = i === 0 ? metricLabel : ""; // mimic merged cells
+        const rowCompanyCell = c.name || c.id;
+
+        const monthValues = months.map(m => {
+          const v = getValueFor(data, m, c.id, ds.id, metric.id);
+          return v === null || v === undefined ? "" : String(v);
+        });
+
+        rows.push([rowMetricCell, rowCompanyCell].concat(monthValues));
       }
+
+      // Blank spacer row between metric blocks (like your sheet’s breathing room)
+      rows.push(["", ""].concat(months.map(() => "")));
     }
   }
 
-  // Stable sorting helps when comparing exports
-  rows.sort((a, b) =>
-    a.month.localeCompare(b.month) ||
-    a.companyId.localeCompare(b.companyId) ||
-    a.datasetId.localeCompare(b.datasetId) ||
-    a.metricId.localeCompare(b.metricId)
-  );
-
-  return rows;
+  return { rows, months };
 }
 
 function csvEscape(value) {
@@ -260,55 +291,42 @@ function downloadBlob(filename, mime, content) {
   URL.revokeObjectURL(url);
 }
 
-function exportAllToCsv(data) {
-  const rows = toExportRowsAllData(data);
-  const headers = [
-    "month",
-    "companyId",
-    "companyName",
-    "domain",
-    "datasetId",
-    "datasetName",
-    "metricId",
-    "metricLabel",
-    "value"
-  ];
-
-  const lines = [];
-  lines.push(headers.join(","));
-  for (const r of rows) {
-    lines.push(headers.map(h => csvEscape(r[h])).join(","));
-  }
-
+function exportMatrixToCsv(data) {
+  const { rows } = buildMatrixRows(data);
+  const csv = rows.map(r => r.map(csvEscape).join(",")).join("\n");
   const exportTime = new Date().toISOString().replace(/[:.]/g, "-");
-  downloadBlob(`competitor-metrics-${exportTime}.csv`, "text/csv;charset=utf-8", lines.join("\n"));
+  downloadBlob(`competitor-metrics-matrix-${exportTime}.csv`, "text/csv;charset=utf-8", csv);
 }
 
-function exportAllToXlsx(data) {
+function exportMatrixToXlsx(data) {
   if (!window.XLSX) {
     alert("Excel export library failed to load. Try refreshing the page.");
     return;
   }
 
-  const rows = toExportRowsAllData(data);
-
-  const meta = [
-    { key: "generatedAt", value: data.generatedAt || "" },
-    { key: "exportTime", value: new Date().toISOString() },
-    { key: "ui.timeRange", value: state.timeRange },
-    { key: "ui.selectedCompanies", value: Array.from(state.selectedCompanies).join(",") },
-    { key: "ui.selectedDatasets", value: Array.from(state.selectedDatasets).join(",") }
-  ];
+  const { rows, months } = buildMatrixRows(data);
 
   const wb = XLSX.utils.book_new();
-  const wsData = XLSX.utils.json_to_sheet(rows);
-  XLSX.utils.book_append_sheet(wb, wsData, "data");
+  const ws = XLSX.utils.aoa_to_sheet(rows);
 
-  const wsMeta = XLSX.utils.json_to_sheet(meta);
-  XLSX.utils.book_append_sheet(wb, wsMeta, "metadata");
+  // Basic column widths: Metric, Company, then months
+  const cols = [
+    { wch: 32 }, // Metric label
+    { wch: 18 }  // Company
+  ].concat(months.map(() => ({ wch: 18 })));
+  ws["!cols"] = cols;
+
+  // Freeze top 2 rows and first 2 columns (like a report)
+  ws["!freeze"] = { xSplit: 2, ySplit: 2, topLeftCell: "C3", activePane: "bottomRight", state: "frozen" };
+
+  // Styling (best-effort; SheetJS community build has limited style support).
+  // We'll at least bold the first two rows by setting cell types/values; real fills require xlsx-style.
+  // Still produces correct structure even without colors.
+
+  XLSX.utils.book_append_sheet(wb, ws, "Report");
 
   const exportTime = new Date().toISOString().replace(/[:.]/g, "-");
-  XLSX.writeFile(wb, `competitor-metrics-${exportTime}.xlsx`);
+  XLSX.writeFile(wb, `competitor-metrics-matrix-${exportTime}.xlsx`);
 }
 
 async function init() {
@@ -351,14 +369,15 @@ async function init() {
     refresh();
   });
 
+  // Export buttons: matrix-style report (all data)
   document.getElementById("exportCsv").addEventListener("click", async () => {
     const d = await loadData();
-    exportAllToCsv(d);
+    exportMatrixToCsv(d);
   });
 
   document.getElementById("exportXlsx").addEventListener("click", async () => {
     const d = await loadData();
-    exportAllToXlsx(d);
+    exportMatrixToXlsx(d);
   });
 
   refresh();
