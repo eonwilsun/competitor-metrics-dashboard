@@ -47,9 +47,11 @@
       <div class="control-actions">
         <button id="exportCsv" type="button">Download CSV</button>
         <button id="exportXlsx" type="button">Download Excel (.xlsx)</button>
+        <button id="exportNotesCsv" type="button">Download Notes CSV</button>
       </div>
       <p class="muted" style="margin-top: 8px;">
-        Exports all months & all companies/datasets from <code>data/metrics.json</code>.
+        Report exports all months & all companies/datasets from <code>data/metrics.json</code>.
+        Notes export follows the selected Time Range.
       </p>
     </div>
   </section>
@@ -58,6 +60,17 @@
     <section class="card">
       <h2>Metrics</h2>
       <div id="metricsDisplay" class="table-wrap"></div>
+    </section>
+
+    <section class="card">
+      <h2>Notes (time-range specific)</h2>
+      <p class="muted" style="margin-top: -6px;">
+        Notes are saved in your browser (localStorage). Change Time Range to edit notes for different months.
+      </p>
+      <div id="notesDisplay" class="table-wrap"></div>
+      <div style="margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap;">
+        <button id="notesClearVisible" type="button">Clear notes in current view</button>
+      </div>
     </section>
   </main>
 
