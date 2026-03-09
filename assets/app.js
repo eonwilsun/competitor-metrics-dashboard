@@ -197,6 +197,24 @@ function deleteNote(notesObj, month, companyId) {
   if (Object.keys(notesObj[month]).length === 0) delete notesObj[month];
 }
 
+function saveSingleNote(month, companyId, rawValue) {
+  const notes = loadNotesState();
+  const v = String(rawValue || "").trim();
+  if (!v) deleteNote(notes, month, companyId);
+  else setNote(notes, month, companyId, v);
+  saveNotesState(notes);
+}
+
+function showSavedIndicator(btn) {
+  const prev = btn.textContent;
+  btn.textContent = "Saved";
+  btn.disabled = true;
+  setTimeout(() => {
+    btn.textContent = prev;
+    btn.disabled = false;
+  }, 700);
+}
+
 function buildNotesTable(data, months) {
   const companies = data.companies || [];
   const notesObj = loadNotesState();
@@ -221,6 +239,11 @@ function buildNotesTable(data, months) {
 
     for (const m of months) {
       const cell = el("td");
+
+      const wrap = el("div", {
+        style: "display:flex; gap:8px; align-items:flex-start;"
+      });
+
       const textarea = el("textarea", {
         "data-month": m,
         "data-company": c.id,
@@ -229,16 +252,27 @@ function buildNotesTable(data, months) {
       });
       textarea.value = getNote(notesObj, m, c.id);
 
-      // Save on blur to keep it simple
+      // Auto-save on blur (existing behavior)
       textarea.addEventListener("blur", () => {
-        const notes = loadNotesState();
-        const v = textarea.value.trim();
-        if (!v) deleteNote(notes, m, c.id);
-        else setNote(notes, m, c.id, v);
-        saveNotesState(notes);
+        saveSingleNote(m, c.id, textarea.value);
       });
 
-      cell.appendChild(textarea);
+      // Manual save button (new)
+      const saveBtn = el("button", {
+        type: "button",
+        text: "Save",
+        title: "Save this note"
+      });
+      saveBtn.addEventListener("click", () => {
+        saveSingleNote(m, c.id, textarea.value);
+        showSavedIndicator(saveBtn);
+        textarea.focus();
+      });
+
+      wrap.appendChild(textarea);
+      wrap.appendChild(saveBtn);
+
+      cell.appendChild(wrap);
       tr.appendChild(cell);
     }
 
@@ -395,7 +429,7 @@ function exportMatrixToXlsx(data) {
   ws["!freeze"] = { xSplit: 2, ySplit: 2, topLeftCell: "C3", activePane: "bottomRight", state: "frozen" };
   XLSX.utils.book_append_sheet(wb, ws, "Report");
 
-  // Notes sheet (ALL notes stored, regardless of current view)
+  // Notes sheet (ALL notes stored)
   const notes = loadNotesState();
   const allMonths = getAllMonthsSorted(data);
   const notesHeader = ["Company"].concat(allMonths);
