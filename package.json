@@ -3,6 +3,23 @@
   "private": true,
   "type": "module",
   "devDependencies": {
-    "playwright": "^1.50.0"
-  }
+    "playwright": "^1.58.2"
+  },
+  "version": "1.0.0",
+  "description": "This dashboard provides insights into competitor metrics, allowing users to view data trends over time. Instructions for usage are provided below.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eonwilsun/competitor-metrics-dashboard.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/eonwilsun/competitor-metrics-dashboard/issues"
+  },
+  "homepage": "https://github.com/eonwilsun/competitor-metrics-dashboard#readme"
 }
