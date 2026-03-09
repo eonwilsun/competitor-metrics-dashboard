@@ -79,86 +79,50 @@ function renderToggles(container, items, selectedSet, labelFn) {
   }
 }
 
-function buildTable(data, months, companies, datasets) {
-  const monthSet = new Set(months);
-  const snapshots = data.snapshots.filter(s => monthSet.has(s.month));
+// -----------------------
+// Overrides (metric edits) stored in localStorage
+// Stored per: timeRange + companyId + datasetId + metricId
+// -----------------------
+const OVERRIDES_KEY = "competitorMetricsOverrides.v1";
 
-  // Latest-first ordering
-  snapshots.sort((a, b) => (a.month < b.month ? 1 : -1));
-
-  const table = el("table");
-  const thead = el("thead");
-  const trh = el("tr");
-
-  trh.appendChild(el("th", { text: "Company" }));
-  trh.appendChild(el("th", { text: "Domain" }));
-
-  // Build columns: for each dataset metric => either show single month (this/last) or average over months
-  const columns = [];
-  for (const ds of datasets) {
-    for (const metric of ds.metrics) {
-      columns.push({ datasetId: ds.id, datasetName: ds.name, metricId: metric.id, metricLabel: metric.label, format: metric.format });
-    }
+function loadOverrides() {
+  try {
+    const raw = localStorage.getItem(OVERRIDES_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    return parsed;
+  } catch {
+    return {};
   }
-
-  for (const col of columns) {
-    trh.appendChild(el("th", { text: col.metricLabel }));
-  }
-
-  thead.appendChild(trh);
-  table.appendChild(thead);
-
-  const tbody = el("tbody");
-  const singleMonth = months.length === 1;
-
-  for (const company of companies) {
-    const tr = el("tr");
-
-    tr.appendChild(el("td", {}, [
-      el("div", { text: company.name }),
-      el("div", { className: "muted", text: company.id })
-    ]));
-
-    tr.appendChild(el("td", { text: company.domain }));
-
-    for (const col of columns) {
-      let value;
-
-      if (singleMonth) {
-        const snap = snapshots.find(s => s.month === months[0]);
-        value = snap?.values?.[company.id]?.[col.datasetId]?.[col.metricId];
-      } else {
-        // Average across available months in range
-        const values = snapshots
-          .map(s => s?.values?.[company.id]?.[col.datasetId]?.[col.metricId])
-          .filter(v => v !== null && v !== undefined && !Number.isNaN(Number(v)));
-
-        if (values.length === 0) value = null;
-        else value = Math.round(values.reduce((a, b) => a + Number(b), 0) / values.length);
-      }
-
-      tr.appendChild(el("td", { text: formatValue(value, col.format) }));
-    }
-
-    tbody.appendChild(tr);
-  }
-
-  table.appendChild(tbody);
-  return table;
 }
 
-let cachedData = null;
-
-async function loadData() {
-  if (cachedData) return cachedData;
-  const res = await fetch(DATA_URL, { cache: "no-cache" });
-  cachedData = await res.json();
-  return cachedData;
+function saveOverrides(obj) {
+  localStorage.setItem(OVERRIDES_KEY, JSON.stringify(obj));
 }
 
-function getLatestMonth(data) {
-  const months = data.snapshots.map(s => s.month).sort();
-  return months[months.length - 1]; // last ascending
+function overrideKey({ timeRange, companyId, datasetId, metricId }) {
+  return `${timeRange}::${companyId}::${datasetId}::${metricId}`;
+}
+
+function getOverrideValue(ctx) {
+  const overrides = loadOverrides();
+  const k = overrideKey(ctx);
+  return overrides[k];
+}
+
+function setOverrideValue(ctx, value) {
+  const overrides = loadOverrides();
+  const k = overrideKey(ctx);
+  overrides[k] = value;
+  saveOverrides(overrides);
+}
+
+function clearOverrideValue(ctx) {
+  const overrides = loadOverrides();
+  const k = overrideKey(ctx);
+  delete overrides[k];
+  saveOverrides(overrides);
 }
 
 // -----------------------
@@ -215,6 +179,128 @@ function showSavedIndicator(btn) {
   }, 700);
 }
 
+// -----------------------
+// Metrics table (now clickable values)
+// -----------------------
+function buildTable(data, months, companies, datasets) {
+  const monthSet = new Set(months);
+  const snapshots = data.snapshots.filter(s => monthSet.has(s.month));
+
+  // Latest-first ordering
+  snapshots.sort((a, b) => (a.month < b.month ? 1 : -1));
+
+  const table = el("table");
+  const thead = el("thead");
+  const trh = el("tr");
+
+  trh.appendChild(el("th", { text: "Company" }));
+  trh.appendChild(el("th", { text: "Domain" }));
+
+  // Columns: dataset metrics
+  const columns = [];
+  for (const ds of datasets) {
+    for (const metric of ds.metrics) {
+      columns.push({
+        datasetId: ds.id,
+        datasetName: ds.name,
+        metricId: metric.id,
+        metricLabel: metric.label,
+        format: metric.format
+      });
+    }
+  }
+
+  for (const col of columns) {
+    trh.appendChild(el("th", { text: col.metricLabel }));
+  }
+
+  thead.appendChild(trh);
+  table.appendChild(thead);
+
+  const tbody = el("tbody");
+  const singleMonth = months.length === 1;
+
+  for (const company of companies) {
+    const tr = el("tr");
+
+    tr.appendChild(el("td", {}, [
+      el("div", { text: company.name }),
+      el("div", { className: "muted", text: company.id })
+    ]));
+
+    tr.appendChild(el("td", { text: company.domain }));
+
+    for (const col of columns) {
+      let computedValue;
+
+      if (singleMonth) {
+        const snap = snapshots.find(s => s.month === months[0]);
+        computedValue = snap?.values?.[company.id]?.[col.datasetId]?.[col.metricId];
+      } else {
+        const values = snapshots
+          .map(s => s?.values?.[company.id]?.[col.datasetId]?.[col.metricId])
+          .filter(v => v !== null && v !== undefined && !Number.isNaN(Number(v)));
+
+        if (values.length === 0) computedValue = null;
+        else computedValue = Math.round(values.reduce((a, b) => a + Number(b), 0) / values.length);
+      }
+
+      // Apply override if present (overrides the displayed computed value)
+      const ctx = {
+        timeRange: state.timeRange,
+        companyId: company.id,
+        datasetId: col.datasetId,
+        metricId: col.metricId
+      };
+      const override = getOverrideValue(ctx);
+      const displayedValue = (override === undefined) ? computedValue : override;
+
+      const isEmpty = displayedValue === null || displayedValue === undefined;
+      const td = el("td");
+
+      const span = el("span", {
+        className: `clickable-metric${isEmpty ? " muted-cell" : ""}`,
+        text: formatValue(displayedValue, col.format),
+        title: "Click to edit (local override)"
+      });
+
+      span.addEventListener("click", () => {
+        openEditMetricModal({
+          ctx,
+          company,
+          col,
+          currentValue: displayedValue
+        });
+      });
+
+      td.appendChild(span);
+      tr.appendChild(td);
+    }
+
+    tbody.appendChild(tr);
+  }
+
+  table.appendChild(tbody);
+  return table;
+}
+
+let cachedData = null;
+
+async function loadData() {
+  if (cachedData) return cachedData;
+  const res = await fetch(DATA_URL, { cache: "no-cache" });
+  cachedData = await res.json();
+  return cachedData;
+}
+
+function getLatestMonth(data) {
+  const months = data.snapshots.map(s => s.month).sort();
+  return months[months.length - 1]; // last ascending
+}
+
+// -----------------------
+// Notes UI
+// -----------------------
 function buildNotesTable(data, months) {
   const companies = data.companies || [];
   const notesObj = loadNotesState();
@@ -239,30 +325,19 @@ function buildNotesTable(data, months) {
 
     for (const m of months) {
       const cell = el("td");
-
-      const wrap = el("div", {
-        style: "display:flex; gap:8px; align-items:flex-start;"
-      });
+      const wrap = el("div", { style: "display:flex; gap:8px; align-items:flex-start;" });
 
       const textarea = el("textarea", {
-        "data-month": m,
-        "data-company": c.id,
         rows: "3",
         style: "width: 100%; min-width: 180px; resize: vertical;"
       });
       textarea.value = getNote(notesObj, m, c.id);
 
-      // Auto-save on blur (existing behavior)
       textarea.addEventListener("blur", () => {
         saveSingleNote(m, c.id, textarea.value);
       });
 
-      // Manual save button (new)
-      const saveBtn = el("button", {
-        type: "button",
-        text: "Save",
-        title: "Save this note"
-      });
+      const saveBtn = el("button", { type: "button", text: "Save", title: "Save this note" });
       saveBtn.addEventListener("click", () => {
         saveSingleNote(m, c.id, textarea.value);
         showSavedIndicator(saveBtn);
@@ -271,7 +346,6 @@ function buildNotesTable(data, months) {
 
       wrap.appendChild(textarea);
       wrap.appendChild(saveBtn);
-
       cell.appendChild(wrap);
       tr.appendChild(cell);
     }
@@ -308,12 +382,12 @@ function exportNotesToCsv(data, months) {
 }
 
 // -----------------------
-// Export (matrix report like your Google Sheet)
+// Matrix export (report)
 // -----------------------
 function monthLabel(yyyyMm) {
   const [y, m] = yyyyMm.split("-").map(Number);
   const dt = new Date(Date.UTC(y, m - 1, 1));
-  return dt.toLocaleString(undefined, { month: "long" }); // "March"
+  return dt.toLocaleString(undefined, { month: "long" });
 }
 
 function monthYear(yyyyMm) {
@@ -322,7 +396,7 @@ function monthYear(yyyyMm) {
 
 function getAllMonthsSorted(data) {
   const months = (data.snapshots || []).map(s => s.month);
-  months.sort(); // ascending old -> new
+  months.sort(); // old -> new
   return months;
 }
 
@@ -340,7 +414,6 @@ function getValueFor(data, month, companyId, datasetId, metricId) {
 }
 
 function buildMatrixRows(data) {
-  // Matrix uses ALL months, ALL companies, ALL datasets/metrics
   const months = getAllMonthsSorted(data);
   const companies = data.companies || [];
   const datasets = data.datasets || [];
@@ -355,8 +428,6 @@ function buildMatrixRows(data) {
 
   for (const ds of datasets) {
     const sectionTitle = datasetSectionTitle(ds.id, ds.name);
-
-    // Section header row
     rows.push([sectionTitle, ""].concat(months.map(() => "")));
 
     for (const metric of ds.metrics || []) {
@@ -374,7 +445,6 @@ function buildMatrixRows(data) {
 
         rows.push([rowMetricCell, rowCompanyCell].concat(monthValues));
       }
-
       rows.push(["", ""].concat(months.map(() => "")));
     }
   }
@@ -415,21 +485,14 @@ function exportMatrixToXlsx(data) {
   }
 
   const { rows, months } = buildMatrixRows(data);
-
   const wb = XLSX.utils.book_new();
 
-  // Report sheet
   const ws = XLSX.utils.aoa_to_sheet(rows);
-
-  ws["!cols"] = [
-    { wch: 36 }, // Metric label
-    { wch: 18 }  // Company
-  ].concat(months.map(() => ({ wch: 18 })));
-
+  ws["!cols"] = [{ wch: 36 }, { wch: 18 }].concat(months.map(() => ({ wch: 18 })));
   ws["!freeze"] = { xSplit: 2, ySplit: 2, topLeftCell: "C3", activePane: "bottomRight", state: "frozen" };
   XLSX.utils.book_append_sheet(wb, ws, "Report");
 
-  // Notes sheet (ALL notes stored)
+  // Notes sheet (all stored notes)
   const notes = loadNotesState();
   const allMonths = getAllMonthsSorted(data);
   const notesHeader = ["Company"].concat(allMonths);
@@ -440,7 +503,6 @@ function exportMatrixToXlsx(data) {
     for (const m of allMonths) row.push(getNote(notes, m, c.id) || "");
     notesRows.push(row);
   }
-
   const wsNotes = XLSX.utils.aoa_to_sheet(notesRows);
   wsNotes["!cols"] = [{ wch: 22 }].concat(allMonths.map(() => ({ wch: 30 })));
   XLSX.utils.book_append_sheet(wb, wsNotes, "Notes");
@@ -449,6 +511,79 @@ function exportMatrixToXlsx(data) {
   XLSX.writeFile(wb, `competitor-metrics-matrix-${exportTime}.xlsx`);
 }
 
+// -----------------------
+// Edit Metric Modal
+// -----------------------
+let editModalState = null;
+
+function openEditMetricModal({ ctx, company, col, currentValue }) {
+  editModalState = { ctx, company, col };
+
+  const backdrop = document.getElementById("editMetricModalBackdrop");
+  const subtitle = document.getElementById("editMetricSubtitle");
+  const input = document.getElementById("editMetricNewValue");
+  const hint = document.getElementById("editMetricHint");
+
+  subtitle.textContent = `${company.name} • ${col.metricLabel} • Time range: ${ctx.timeRange}`;
+  hint.textContent = "This creates a local override in your browser only.";
+  input.value = (currentValue === null || currentValue === undefined || currentValue === "—") ? "" : String(currentValue);
+
+  backdrop.style.display = "flex";
+  backdrop.setAttribute("aria-hidden", "false");
+
+  setTimeout(() => input.focus(), 0);
+}
+
+function closeEditMetricModal() {
+  const backdrop = document.getElementById("editMetricModalBackdrop");
+  backdrop.style.display = "none";
+  backdrop.setAttribute("aria-hidden", "true");
+  editModalState = null;
+}
+
+function wireEditMetricModal() {
+  const backdrop = document.getElementById("editMetricModalBackdrop");
+  const closeBtn = document.getElementById("editMetricClose");
+  const updateBtn = document.getElementById("editMetricUpdate");
+  const clearBtn = document.getElementById("editMetricClear");
+  const input = document.getElementById("editMetricNewValue");
+
+  closeBtn.addEventListener("click", closeEditMetricModal);
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop) closeEditMetricModal();
+  });
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && editModalState) closeEditMetricModal();
+  });
+
+  updateBtn.addEventListener("click", () => {
+    if (!editModalState) return;
+    const raw = input.value;
+    if (raw === "" || raw === null || raw === undefined) {
+      alert("Enter a value (or click Clear override).");
+      return;
+    }
+    const num = Number(raw);
+    if (Number.isNaN(num)) {
+      alert("Please enter a valid number.");
+      return;
+    }
+    setOverrideValue(editModalState.ctx, num);
+    closeEditMetricModal();
+    refresh();
+  });
+
+  clearBtn.addEventListener("click", () => {
+    if (!editModalState) return;
+    clearOverrideValue(editModalState.ctx);
+    closeEditMetricModal();
+    refresh();
+  });
+}
+
+// -----------------------
+// Refresh / init
+// -----------------------
 function refreshNotes(data) {
   const latestMonth = getLatestMonth(data);
   const months = getRangeMonths(latestMonth, state.timeRange);
@@ -523,7 +658,6 @@ async function init() {
     refresh();
   });
 
-  // Export buttons
   document.getElementById("exportCsv").addEventListener("click", async () => {
     const d = await loadData();
     exportMatrixToCsv(d);
@@ -554,6 +688,7 @@ async function init() {
     refreshNotes(d);
   });
 
+  wireEditMetricModal();
   refresh();
 }
 
