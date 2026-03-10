@@ -5,8 +5,34 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="stylesheet" href="assets/style.css" />
   <title>Competitor Metrics Dashboard</title>
+
   <style>
-    /* Minimal modal styles (kept here to avoid editing style.css) */
+    .hidden { display: none !important; }
+
+    .lockscreen {
+      max-width: 560px;
+      margin: 48px auto;
+      padding: 18px;
+      border: 1px solid #e6e6e6;
+      border-radius: 12px;
+      background: #fff;
+    }
+    .lockscreen input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #d0d0d0;
+      border-radius: 8px;
+      font-size: 14px;
+      margin-top: 8px;
+    }
+    .lockscreen .actions {
+      margin-top: 12px;
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    /* Minimal modal styles (for editing numbers) */
     .modal-backdrop {
       position: fixed;
       inset: 0;
@@ -61,79 +87,84 @@
     }
     .clickable-metric.muted-cell {
       text-decoration: none;
-      cursor: pointer;
       opacity: 0.85;
     }
   </style>
 </head>
+
 <body>
   <header class="header">
     <h1>Competitor Metrics Dashboard</h1>
     <p class="subtle" id="lastUpdated"></p>
+    <div style="margin-top: 8px;">
+      <button id="lockBtn" type="button" class="hidden">Lock</button>
+    </div>
   </header>
 
-  <section class="controls" id="controls">
-    <div class="control-block">
-      <h2>Time Range</h2>
-      <label for="timeRange">Select Time Range:</label>
-      <select id="timeRange">
-        <option value="thisMonth">This Month</option>
-        <option value="lastMonth">Last Month</option>
-        <option value="last6Months">Last 6 Months</option>
-        <option value="lastYear">Last Year</option>
-      </select>
-    </div>
-
-    <div class="control-block">
-      <h2>Companies</h2>
-      <div class="control-actions">
-        <button id="companiesAllOn" type="button">All on</button>
-        <button id="companiesAllOff" type="button">All off</button>
-      </div>
-      <div id="companyToggle" class="toggle-grid"></div>
-    </div>
-
-    <div class="control-block">
-      <h2>Datasets</h2>
-      <div class="control-actions">
-        <button id="datasetsAllOn" type="button">All on</button>
-        <button id="datasetsAllOff" type="button">All off</button>
-      </div>
-      <div id="datasetToggle" class="toggle-grid"></div>
-    </div>
-
-    <div class="control-block">
-      <h2>Export</h2>
-      <div class="control-actions">
-        <button id="exportCsv" type="button">Download CSV</button>
-        <button id="exportXlsx" type="button">Download Excel (.xlsx)</button>
-        <button id="exportNotesCsv" type="button">Download Notes CSV</button>
-      </div>
-      <p class="muted" style="margin-top: 8px;">
-        Report exports all months & all companies/datasets from <code>data/metrics.json</code>.
-        Notes export follows the selected Time Range.
-      </p>
-    </div>
-  </section>
-
   <main class="main">
-    <section class="card">
-      <h2>Metrics</h2>
-      <p class="muted" style="margin-top: -6px;">
-        Tip: click a number to override it for your current time range (saved in your browser).
-      </p>
-      <div id="metricsDisplay" class="table-wrap"></div>
+    <!-- Locked screen -->
+    <section id="lockScreen" class="lockscreen">
+      <h2>Locked</h2>
+      <p class="muted">Enter the password to access the dashboard.</p>
+
+      <label for="pagePassword" class="subtle">Password</label>
+      <input id="pagePassword" type="password" autocomplete="current-password" />
+
+      <div class="actions">
+        <button id="unlockBtn" type="button">Unlock</button>
+      </div>
+
+      <p id="lockError" class="muted" style="color:#b00020; margin-top: 10px;"></p>
     </section>
 
-    <section class="card">
-      <h2>Notes (time-range specific)</h2>
-      <p class="muted" style="margin-top: -6px;">
-        Notes are saved in your browser (localStorage). Change Time Range to edit notes for different months.
-      </p>
-      <div id="notesDisplay" class="table-wrap"></div>
-      <div style="margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap;">
-        <button id="notesClearVisible" type="button">Clear notes in current view</button>
-      </div>
+    <!-- App -->
+    <section id="appRoot" class="hidden">
+      <section class="controls" id="controls">
+        <div class="control-block">
+          <h2>Time Range</h2>
+          <label for="timeRange">Select Time Range:</label>
+          <select id="timeRange">
+            <option value="thisMonth">This Month</option>
+            <option value="lastMonth">Last Month</option>
+            <option value="last6Months">Last 6 Months</option>
+            <option value="lastYear">Last Year</option>
+          </select>
+        </div>
+
+        <div class="control-block">
+          <h2>Companies</h2>
+          <div class="control-actions">
+            <button id="companiesAllOn" type="button">All on</button>
+            <button id="companiesAllOff" type="button">All off</button>
+          </div>
+          <div id="companyToggle" class="toggle-grid"></div>
+        </div>
+
+        <div class="control-block">
+          <h2>Datasets</h2>
+          <div class="control-actions">
+            <button id="datasetsAllOn" type="button">All on</button>
+            <button id="datasetsAllOff" type="button">All off</button>
+          </div>
+          <div id="datasetToggle" class="toggle-grid"></div>
+        </div>
+
+        <div class="control-block">
+          <h2>Export</h2>
+          <div class="control-actions">
+            <button id="exportCsv" type="button">Download CSV</button>
+            <button id="exportXlsx" type="button">Download Excel (.xlsx)</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Metrics</h2>
+        <p class="muted" style="margin-top:-6px;">
+          Click a number to edit it. Changes save to Xano.
+        </p>
+        <div id="metricsDisplay" class="table-wrap"></div>
+      </section>
     </section>
   </main>
 
@@ -142,7 +173,7 @@
     <div class="modal">
       <div class="modal-header">
         <div>
-          <div style="font-weight: 700;">Edit metric value</div>
+          <div style="font-weight: 700;">Edit value</div>
           <div class="subtle" id="editMetricSubtitle" style="margin-top: 2px;"></div>
         </div>
         <button class="modal-close" id="editMetricClose" aria-label="Close">✕</button>
@@ -157,13 +188,11 @@
       </div>
 
       <div class="modal-actions">
-        <button id="editMetricClear" type="button">Clear override</button>
         <button id="editMetricUpdate" type="button">Update</button>
       </div>
     </div>
   </div>
 
-  <!-- SheetJS for Excel export -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="assets/app.js"></script>
 </body>
