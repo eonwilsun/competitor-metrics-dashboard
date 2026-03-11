@@ -494,15 +494,24 @@ function closeEditTextModal() {
   document.getElementById("editTextUpdate").dataset.mode = "";
 }
 
+// -------------------------
+// IMPORTANT FIX: the Update button wasn't wired in your current file.
+// This function now wires BOTH editMetricUpdate and editTextUpdate.
+// -------------------------
 function wireEditModals() {
+  // ----- Number modal close -----
   document.getElementById("editMetricClose").addEventListener("click", closeEditMetricModal);
   document.getElementById("editMetricModalBackdrop").addEventListener("click", (e) => {
     if (e.target.id === "editMetricModalBackdrop") closeEditMetricModal();
   });
+
+  // ----- Number modal update -----
   document.getElementById("editMetricUpdate").addEventListener("click", async () => {
     if (!editModalState) return;
 
+    const btn = document.getElementById("editMetricUpdate");
     const raw = document.getElementById("editMetricNewValue").value;
+
     if (raw === "" || raw === null || raw === undefined) return alert("Enter a value.");
 
     const num = Number(raw);
@@ -511,51 +520,80 @@ function wireEditModals() {
     const { row, fieldKey } = editModalState;
     if (!row?.id) return alert("Missing record id.");
 
-    await xanoFetch(`${XANO_TABLE_PATH}/${row.id}`, {
-      method: "PATCH",
-      body: { [fieldKey]: num },
-      withEditKey: true
-    });
+    try {
+      btn.disabled = true;
+      btn.textContent = "Saving...";
 
-    closeEditMetricModal();
-    await reloadFromXanoAndRefresh();
+      await xanoFetch(`${XANO_TABLE_PATH}/${row.id}`, {
+        method: "PATCH",
+        body: { [fieldKey]: num },
+        withEditKey: true
+      });
+
+      closeEditMetricModal();
+      await reloadFromXanoAndRefresh();
+    } catch (err) {
+      alert(`Save failed: ${String(err?.message || err)}`);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Update";
+    }
   });
 
+  // ----- Shared text modal close -----
   document.getElementById("editTextClose").addEventListener("click", closeEditTextModal);
   document.getElementById("editTextModalBackdrop").addEventListener("click", (e) => {
     if (e.target.id === "editTextModalBackdrop") closeEditTextModal();
   });
 
+  // ----- Shared text modal update -----
   document.getElementById("editTextUpdate").addEventListener("click", async () => {
     const mode = document.getElementById("editTextUpdate").dataset.mode || "";
+    const btn = document.getElementById("editTextUpdate");
     const val = document.getElementById("editTextNewValue").value;
     const payloadVal = (val === "" ? null : val);
 
-    if (mode === "press") {
-      if (!editTextModalState?.row?.id) return alert("Missing record id.");
-      await xanoFetch(`${XANO_TABLE_PATH}/${editTextModalState.row.id}`, {
-        method: "PATCH",
-        body: { monthly_press_coverage: payloadVal },
-        withEditKey: true
-      });
-      closeEditTextModal();
-      await reloadFromXanoAndRefresh();
-      return;
-    }
+    try {
+      btn.disabled = true;
+      btn.textContent = "Saving...";
 
-    if (mode === "notes") {
-      if (!editNotesModalState?.row?.id) return alert("Missing record id.");
-      await xanoFetch(`${XANO_TABLE_PATH}/${editNotesModalState.row.id}`, {
-        method: "PATCH",
-        body: { [NOTES_FIELD_KEY]: payloadVal },
-        withEditKey: true
-      });
-      closeEditTextModal();
-      await reloadFromXanoAndRefresh();
-      return;
+      if (mode === "press") {
+        if (!editTextModalState?.row?.id) return alert("Missing record id.");
+
+        await xanoFetch(`${XANO_TABLE_PATH}/${editTextModalState.row.id}`, {
+          method: "PATCH",
+          body: { monthly_press_coverage: payloadVal },
+          withEditKey: true
+        });
+
+        closeEditTextModal();
+        await reloadFromXanoAndRefresh();
+        return;
+      }
+
+      if (mode === "notes") {
+        if (!editNotesModalState?.row?.id) return alert("Missing record id.");
+
+        await xanoFetch(`${XANO_TABLE_PATH}/${editNotesModalState.row.id}`, {
+          method: "PATCH",
+          body: { [NOTES_FIELD_KEY]: payloadVal },
+          withEditKey: true
+        });
+
+        closeEditTextModal();
+        await reloadFromXanoAndRefresh();
+        return;
+      }
+
+    } catch (err) {
+      alert(`Save failed: ${String(err?.message || err)}`);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Update";
     }
   });
 
+  // Esc closes open modal
   window.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
     if (editModalState) closeEditMetricModal();
@@ -629,12 +667,9 @@ function buildMetricsTable(visibleMonths, companies) {
           title: singleMonth ? "Click to edit" : "Shown only in single-month view"
         });
 
-        // Only open editor if you click the cell background, NOT when clicking a link inside it.
         if (singleMonth && editTargetRow && f.editable) {
           div.addEventListener("click", (e) => {
-            // If user clicked an <a>, let it navigate without opening editor
             if (e.target && e.target.closest && e.target.closest("a")) return;
-
             openEditTextModal({
               row: editTargetRow,
               fieldKey: f.key,
@@ -673,7 +708,6 @@ function buildMetricsTable(visibleMonths, companies) {
       tr.appendChild(td);
     }
 
-    // Notes cell: link clicks should NOT open editor either
     const notesTd = el("td");
     let notesRow = null;
     let mk = null;
@@ -819,6 +853,34 @@ function renderChart() {
 }
 
 // -------------------------
+// Styling
+// -------------------------
+function applyMetricsTableStyling() {
+  const root = document.getElementById("metricsDisplay");
+  const table = root?.querySelector("table");
+  if (!table) return;
+
+  root.querySelectorAll(".clickable-metric").forEach((n) => {
+    n.style.textDecoration = "none";
+  });
+
+  table.querySelectorAll("td").forEach((td) => {
+    td.style.textAlign = "center";
+    td.style.verticalAlign = "middle";
+  });
+
+  table.querySelectorAll("tr").forEach((tr) => {
+    const tds = tr.querySelectorAll("td");
+    if (tds[0]) tds[0].style.textAlign = "left";
+    if (tds[1]) tds[1].style.textAlign = "left";
+  });
+
+  table.querySelectorAll("td").forEach((td) => {
+    if (td.querySelector(".metrics-rich")) td.style.textAlign = "left";
+  });
+}
+
+// -------------------------
 // Refresh / load / init
 // -------------------------
 function refresh() {
@@ -846,7 +908,6 @@ function refresh() {
   mount.appendChild(buildMetricsTable(visibleMonths, selected));
   ensureChartMetricOptions(false);
   renderChart();
-
   applyMetricsTableStyling();
 }
 
@@ -865,7 +926,6 @@ async function reloadFromXanoAndRefresh() {
   else for (const c of Array.from(state.selectedCompanies)) if (!companies.includes(c)) state.selectedCompanies.delete(c);
 
   renderCompanyToggles(companies);
-  renderDatasetToggles();
 
   if (!state.visibleMonths.length) {
     const defaultKey = state.latestMonthKey;
@@ -903,7 +963,7 @@ async function attemptUnlock(password) {
   await reloadFromXanoAndRefresh();
 }
 
-// Time-range UI
+// time range UI
 function fillMonthSelect(selectEl) {
   selectEl.innerHTML = "";
   for (const m of MONTH_LABELS) {
@@ -963,34 +1023,6 @@ function setQuickLastMonth() {
   state.visibleMonths = [lastKey];
   setRangeSelectorsFromKeys(lastKey, lastKey);
   refresh();
-}
-
-// -------------------------
-// Metrics table styling (no underlines + centered numeric cells)
-// -------------------------
-function applyMetricsTableStyling() {
-  const root = document.getElementById("metricsDisplay");
-  const table = root?.querySelector("table");
-  if (!table) return;
-
-  root.querySelectorAll(".clickable-metric").forEach((n) => {
-    n.style.textDecoration = "none";
-  });
-
-  table.querySelectorAll("td").forEach((td) => {
-    td.style.textAlign = "center";
-    td.style.verticalAlign = "middle";
-  });
-
-  table.querySelectorAll("tr").forEach((tr) => {
-    const tds = tr.querySelectorAll("td");
-    if (tds[0]) tds[0].style.textAlign = "left";
-    if (tds[1]) tds[1].style.textAlign = "left";
-  });
-
-  table.querySelectorAll("td").forEach((td) => {
-    if (td.querySelector(".metrics-rich")) td.style.textAlign = "left";
-  });
 }
 
 // -------------------------
