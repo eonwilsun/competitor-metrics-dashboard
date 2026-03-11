@@ -163,39 +163,23 @@ function formatPostsBreakdown(obj) {
   if (!obj || typeof obj !== "object") return null;
 
   const images = pickNumberFromObject(obj, [
-    "image_graphic",
-    "Image Graphic",
-    "imageGraphic",
-    "graphic_image",
-    "Graphic Image",
-    "graphic",
-    "Graphic",
-    "Image",
-    "image",
-    "Images",
-    "images"
+    "image_graphic", "Image Graphic", "imageGraphic",
+    "graphic_image", "Graphic Image", "graphic", "Graphic",
+    "Image", "image", "Images", "images"
   ]);
 
   const reels = pickNumberFromObject(obj, [
-    "reels_video",
-    "Reels Video",
-    "reelsVideo",
-    "Reels",
-    "reels"
+    "reels_video", "Reels Video", "reelsVideo", "Reels", "reels"
   ]);
 
   const total = pickNumberFromObject(obj, [
-    "number_of_monthly_instagram_posts_total",
-    "Total",
-    "total",
-    "total_posts"
+    "number_of_monthly_instagram_posts_total", "Total", "total", "total_posts"
   ]);
 
   const parts = [];
   if (images !== null) parts.push(`Images: ${images.toLocaleString()}`);
   if (reels !== null) parts.push(`Reels: ${reels.toLocaleString()}`);
   if (total !== null) parts.push(`Total: ${total.toLocaleString()}`);
-
   return parts.length ? parts.join(", ") : null;
 }
 
@@ -217,10 +201,7 @@ function formatEngagementBreakdown(obj) {
 function extractPostsTotal(obj) {
   if (!obj || typeof obj !== "object") return toNumberOrNull(obj);
   return pickNumberFromObject(obj, [
-    "number_of_monthly_instagram_posts_total",
-    "Total",
-    "total",
-    "total_posts"
+    "number_of_monthly_instagram_posts_total", "Total", "total", "total_posts"
   ]);
 }
 
@@ -350,7 +331,6 @@ const state = {
   rangeEndKey: null,
   minMonthKey: null,
   maxMonthKey: null,
-
   selectedCompanies: new Set(),
   rows: [],
   latestMonthKey: null
@@ -391,11 +371,6 @@ function renderCompanyToggles(companies) {
   }
 }
 
-// No dataset toggles anymore (Datasets section removed from index.html)
-function renderDatasetToggles() {
-  // noop
-}
-
 function findRowByCompanyAndMonth(companyName, monthKey) {
   return state.rows.find(r => String(r.company) === String(companyName) && monthKeyFromYearMonthName(r.year, r.month) === monthKey);
 }
@@ -420,6 +395,20 @@ function normalizeRow(row) {
     (toNumberOrNull(r.monthly_instagram_engagement) !== null ? Number(r.monthly_instagram_engagement).toLocaleString() : null);
 
   return r;
+}
+
+// -------------------------
+// Save payload helper (FIX for "Missing param: year")
+// -------------------------
+function buildUpdatePayload(row, patch) {
+  // Xano endpoint appears to require year (and likely month/company).
+  // Always send them if we have them.
+  const base = {};
+  if (row && row.year !== undefined && row.year !== null) base.year = row.year;
+  if (row && row.month !== undefined && row.month !== null) base.month = row.month;
+  if (row && row.company !== undefined && row.company !== null) base.company = row.company;
+
+  return { ...base, ...patch };
 }
 
 // -------------------------
@@ -494,18 +483,14 @@ function closeEditTextModal() {
   document.getElementById("editTextUpdate").dataset.mode = "";
 }
 
-// -------------------------
-// IMPORTANT FIX: the Update button wasn't wired in your current file.
-// This function now wires BOTH editMetricUpdate and editTextUpdate.
-// -------------------------
 function wireEditModals() {
-  // ----- Number modal close -----
+  // number modal close
   document.getElementById("editMetricClose").addEventListener("click", closeEditMetricModal);
   document.getElementById("editMetricModalBackdrop").addEventListener("click", (e) => {
     if (e.target.id === "editMetricModalBackdrop") closeEditMetricModal();
   });
 
-  // ----- Number modal update -----
+  // number modal update
   document.getElementById("editMetricUpdate").addEventListener("click", async () => {
     if (!editModalState) return;
 
@@ -524,9 +509,11 @@ function wireEditModals() {
       btn.disabled = true;
       btn.textContent = "Saving...";
 
+      const payload = buildUpdatePayload(row, { [fieldKey]: num });
+
       await xanoFetch(`${XANO_TABLE_PATH}/${row.id}`, {
         method: "PATCH",
-        body: { [fieldKey]: num },
+        body: payload,
         withEditKey: true
       });
 
@@ -540,13 +527,13 @@ function wireEditModals() {
     }
   });
 
-  // ----- Shared text modal close -----
+  // shared text modal close
   document.getElementById("editTextClose").addEventListener("click", closeEditTextModal);
   document.getElementById("editTextModalBackdrop").addEventListener("click", (e) => {
     if (e.target.id === "editTextModalBackdrop") closeEditTextModal();
   });
 
-  // ----- Shared text modal update -----
+  // shared text modal update
   document.getElementById("editTextUpdate").addEventListener("click", async () => {
     const mode = document.getElementById("editTextUpdate").dataset.mode || "";
     const btn = document.getElementById("editTextUpdate");
@@ -559,10 +546,11 @@ function wireEditModals() {
 
       if (mode === "press") {
         if (!editTextModalState?.row?.id) return alert("Missing record id.");
+        const payload = buildUpdatePayload(editTextModalState.row, { monthly_press_coverage: payloadVal });
 
         await xanoFetch(`${XANO_TABLE_PATH}/${editTextModalState.row.id}`, {
           method: "PATCH",
-          body: { monthly_press_coverage: payloadVal },
+          body: payload,
           withEditKey: true
         });
 
@@ -573,10 +561,11 @@ function wireEditModals() {
 
       if (mode === "notes") {
         if (!editNotesModalState?.row?.id) return alert("Missing record id.");
+        const payload = buildUpdatePayload(editNotesModalState.row, { [NOTES_FIELD_KEY]: payloadVal });
 
         await xanoFetch(`${XANO_TABLE_PATH}/${editNotesModalState.row.id}`, {
           method: "PATCH",
-          body: { [NOTES_FIELD_KEY]: payloadVal },
+          body: payload,
           withEditKey: true
         });
 
@@ -584,7 +573,6 @@ function wireEditModals() {
         await reloadFromXanoAndRefresh();
         return;
       }
-
     } catch (err) {
       alert(`Save failed: ${String(err?.message || err)}`);
     } finally {
@@ -593,7 +581,6 @@ function wireEditModals() {
     }
   });
 
-  // Esc closes open modal
   window.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
     if (editModalState) closeEditMetricModal();
@@ -708,6 +695,7 @@ function buildMetricsTable(visibleMonths, companies) {
       tr.appendChild(td);
     }
 
+    // Notes cell
     const notesTd = el("td");
     let notesRow = null;
     let mk = null;
@@ -973,6 +961,7 @@ function fillMonthSelect(selectEl) {
     selectEl.appendChild(opt);
   }
 }
+
 function fillYearSelect(selectEl, minYear, maxYear) {
   selectEl.innerHTML = "";
   for (let y = minYear; y <= maxYear; y++) {
@@ -982,6 +971,7 @@ function fillYearSelect(selectEl, minYear, maxYear) {
     selectEl.appendChild(opt);
   }
 }
+
 function setRangeSelectorsFromKeys(startKey, endKey) {
   const s = parseMonthKey(startKey);
   const e = parseMonthKey(endKey);
@@ -991,6 +981,7 @@ function setRangeSelectorsFromKeys(startKey, endKey) {
   document.getElementById("endYear").value = String(e.year);
   document.getElementById("endMonth").value = e.month;
 }
+
 function applyCustomRangeFromSelectors() {
   const startKey = monthKeyFromYYYYMMParts(document.getElementById("startYear").value, document.getElementById("startMonth").value);
   const endKey = monthKeyFromYYYYMMParts(document.getElementById("endYear").value, document.getElementById("endMonth").value);
@@ -1005,6 +996,7 @@ function applyCustomRangeFromSelectors() {
 
   refresh();
 }
+
 function setQuickThisMonth() {
   document.getElementById("quickLastMonth").checked = false;
   const key = currentMonthKeyUTC();
@@ -1014,6 +1006,7 @@ function setQuickThisMonth() {
   setRangeSelectorsFromKeys(key, key);
   refresh();
 }
+
 function setQuickLastMonth() {
   document.getElementById("quickThisMonth").checked = false;
   const thisKey = currentMonthKeyUTC();
