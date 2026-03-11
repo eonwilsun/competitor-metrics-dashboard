@@ -421,6 +421,7 @@ function buildPatchBodyForMetric(row, fieldKey, rawNum) {
     return { [rootKey]: next };
   }
 
+  // Total is derived -> no PATCH from UI
   if (fieldKey === "posts_total") return null;
 
   // Engagement: editable total + rate
@@ -435,6 +436,7 @@ function buildPatchBodyForMetric(row, fieldKey, rawNum) {
     return { [rootKey]: next };
   }
 
+  // Default: patch top-level numeric fields (rounded)
   return { [fieldKey]: Math.round(num) };
 }
 
@@ -515,7 +517,269 @@ function wireChartDownloadButtons() {
 }
 
 // -------------------------
-// Modals
+// Time-range UI helpers (MISSING IN YOUR FILE - FIX)
+// -------------------------
+function fillMonthSelect(selectEl) {
+  if (!selectEl) return;
+  selectEl.innerHTML = "";
+  for (const m of MONTH_LABELS) {
+    const opt = document.createElement("option");
+    opt.value = m.value;
+    opt.textContent = m.name;
+    selectEl.appendChild(opt);
+  }
+}
+
+function fillYearSelect(selectEl, minYear, maxYear) {
+  if (!selectEl) return;
+  selectEl.innerHTML = "";
+  for (let y = minYear; y <= maxYear; y++) {
+    const opt = document.createElement("option");
+    opt.value = String(y);
+    opt.textContent = String(y);
+    selectEl.appendChild(opt);
+  }
+}
+
+function setRangeSelectorsFromKeys(startKey, endKey) {
+  const s = parseMonthKey(startKey);
+  const e = parseMonthKey(endKey);
+  if (!s || !e) return;
+  const sy = document.getElementById("startYear");
+  const sm = document.getElementById("startMonth");
+  const ey = document.getElementById("endYear");
+  const em = document.getElementById("endMonth");
+  if (sy) sy.value = String(s.year);
+  if (sm) sm.value = s.month;
+  if (ey) ey.value = String(e.year);
+  if (em) em.value = e.month;
+}
+
+function applyCustomRangeFromSelectors() {
+  const startKey = monthKeyFromYYYYMMParts(
+    document.getElementById("startYear").value,
+    document.getElementById("startMonth").value
+  );
+  const endKey = monthKeyFromYYYYMMParts(
+    document.getElementById("endYear").value,
+    document.getElementById("endMonth").value
+  );
+  if (compareMonthKey(startKey, endKey) > 0) return alert("Start month must be before (or the same as) End month.");
+
+  const tm = document.getElementById("quickThisMonth");
+  const lm = document.getElementById("quickLastMonth");
+  if (tm) tm.checked = false;
+  if (lm) lm.checked = false;
+
+  state.rangeStartKey = startKey;
+  state.rangeEndKey = endKey;
+  state.visibleMonths = listMonthKeysBetween(startKey, endKey);
+
+  refresh();
+}
+
+function setQuickThisMonth() {
+  const lm = document.getElementById("quickLastMonth");
+  if (lm) lm.checked = false;
+
+  const key = currentMonthKeyUTC();
+  state.rangeStartKey = key;
+  state.rangeEndKey = key;
+  state.visibleMonths = [key];
+
+  setRangeSelectorsFromKeys(key, key);
+  refresh();
+}
+
+function setQuickLastMonth() {
+  const tm = document.getElementById("quickThisMonth");
+  if (tm) tm.checked = false;
+
+  const thisKey = currentMonthKeyUTC();
+  const lastKey = previousMonthKeyUTC(thisKey);
+  state.rangeStartKey = lastKey;
+  state.rangeEndKey = lastKey;
+  state.visibleMonths = [lastKey];
+
+  setRangeSelectorsFromKeys(lastKey, lastKey);
+  refresh();
+}
+
+// -------------------------
+// Company controls (All on/off) (MISSING IN YOUR FILE - FIX)
+// -------------------------
+function wireCompanyBulkButtons() {
+  const allOn = document.getElementById("companiesAllOn");
+  const allOff = document.getElementById("companiesAllOff");
+
+  if (allOn) {
+    allOn.addEventListener("click", () => {
+      uniqueCompanies(state.rows).forEach(c => state.selectedCompanies.add(c));
+      refresh();
+      renderCompanyToggles(uniqueCompanies(state.rows));
+    });
+  }
+
+  if (allOff) {
+    allOff.addEventListener("click", () => {
+      state.selectedCompanies.clear();
+      refresh();
+      renderCompanyToggles(uniqueCompanies(state.rows));
+    });
+  }
+}
+
+// -------------------------
+// Table rendering (MISSING IN YOUR FILE - FIX)
+// -------------------------
+function buildMetricsTable(visibleMonths, companies) {
+  const table = el("table");
+  const thead = el("thead");
+  const trh = el("tr");
+
+  trh.appendChild(el("th", { text: "Company" }));
+  trh.appendChild(el("th", { text: "Month(s)" }));
+  for (const f of METRIC_FIELDS) trh.appendChild(el("th", { text: f.label }));
+  trh.appendChild(el("th", { text: "Notes" }));
+
+  thead.appendChild(trh);
+  table.appendChild(thead);
+
+  const tbody = el("tbody");
+  const singleMonth = visibleMonths.length === 1;
+
+  for (const companyName of companies) {
+    const tr = el("tr");
+    tr.appendChild(el("td", { text: companyName }));
+    tr.appendChild(el("td", { text: singleMonth ? visibleMonths[0] : `${visibleMonths.length} months` }));
+
+    for (const f of METRIC_FIELDS) {
+      let displayValue = null;
+      let editTargetRow = null;
+      let editMonthKey = null;
+
+      if (singleMonth) {
+        editMonthKey = visibleMonths[0];
+        editTargetRow = findRowByCompanyAndMonth(companyName, editMonthKey);
+        displayValue = editTargetRow ? editTargetRow[f.key] : null;
+      } else {
+        // multi-month view: average numeric
+        if (f.format === "int" || f.format === "float") {
+          displayValue = averageNumericForCompanyAcrossMonths(companyName, visibleMonths, f.key);
+        } else {
+          displayValue = null;
+        }
+      }
+
+      const td = el("td");
+
+      if (f.format === "richtext") {
+        const html = displayValue ? linkifyTextToHtml(displayValue) : "—";
+        const div = el("div", {
+          className: `clickable-metric metrics-rich${(!displayValue ? " muted-cell" : "")}`,
+          html,
+          title: singleMonth ? "Click to edit" : "Shown only in single-month view"
+        });
+
+        if (singleMonth && editTargetRow && f.editable) {
+          div.addEventListener("click", (e) => {
+            if (e.target && e.target.closest && e.target.closest("a")) return;
+            openEditTextModal({
+              row: editTargetRow,
+              fieldKey: f.key,
+              fieldLabel: f.label,
+              currentValue: editTargetRow[f.key],
+              monthKey: editMonthKey
+            });
+          });
+        }
+
+        td.appendChild(div);
+        tr.appendChild(td);
+        continue;
+      }
+
+      const isEmpty = displayValue === null || displayValue === undefined || displayValue === "";
+      const span = el("span", {
+        className: `clickable-metric metrics-num${isEmpty ? " muted-cell" : ""}`,
+        text: formatValue(displayValue, f.format),
+        title: singleMonth ? (f.readOnly ? "Derived (edit Images/Reels)" : "Click to edit") : "Averaged across selected months"
+      });
+
+      if (singleMonth && editTargetRow && !f.readOnly) {
+        span.addEventListener("click", () => {
+          openEditMetricModal({
+            row: editTargetRow,
+            fieldKey: f.key,
+            fieldLabel: f.label,
+            currentValue: editTargetRow[f.key],
+            monthKey: editMonthKey
+          });
+        });
+      }
+
+      td.appendChild(span);
+      tr.appendChild(td);
+    }
+
+    // Notes cell
+    const notesTd = el("td");
+    let notesRow = null;
+    let mk = null;
+    if (singleMonth) {
+      mk = visibleMonths[0];
+      notesRow = findRowByCompanyAndMonth(companyName, mk);
+    }
+
+    const notesText = singleMonth ? (notesRow?.[NOTES_FIELD_KEY] ?? "") : "";
+    const notesPreview = normalizeText(notesText) ? linkifyTextToHtml(notesText) : "—";
+
+    const notesDiv = el("div", {
+      className: `clickable-metric metrics-rich${(normalizeText(notesText) ? "" : " muted-cell")}`,
+      html: notesPreview,
+      title: singleMonth ? "Click to edit notes" : "Switch to a single month to edit notes"
+    });
+
+    if (singleMonth && notesRow) {
+      notesDiv.addEventListener("click", (e) => {
+        if (e.target && e.target.closest && e.target.closest("a")) return;
+        openEditNotesModal({ row: notesRow, monthKey: mk });
+      });
+    }
+
+    notesTd.appendChild(notesDiv);
+    tr.appendChild(notesTd);
+
+    tbody.appendChild(tr);
+  }
+
+  table.appendChild(tbody);
+  return table;
+}
+
+// -------------------------
+// Multi-month averaging
+// -------------------------
+function averageNumericForCompanyAcrossMonths(companyName, monthKeys, fieldKey) {
+  const vals = monthKeys
+    .map(mk => findRowByCompanyAndMonth(companyName, mk))
+    .map(r => {
+      if (!r) return null;
+
+      // chart helpers (totals from objects)
+      if (fieldKey === "number_of_monthly_instagram_posts") return extractPostsTotal(r.number_of_monthly_instagram_posts);
+      if (fieldKey === "monthly_instagram_engagement") return extractEngagementTotal(r.monthly_instagram_engagement);
+
+      return toNumberOrNull(r[fieldKey]);
+    })
+    .filter(v => v !== null);
+
+  if (!vals.length) return null;
+  return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+}
+
+// -------------------------
+// Modals (Number + Text) (FULL)
 // -------------------------
 let editModalState = null;
 let editTextModalState = null;
@@ -709,9 +973,8 @@ function wireEditModals() {
 }
 
 // -------------------------
-// Table + chart rendering (unchanged from your current working version)
+// Chart.js
 // -------------------------
-
 let metricChart = null;
 
 function getNumericMetricValue(row, metricKey) {
@@ -719,24 +982,6 @@ function getNumericMetricValue(row, metricKey) {
   if (metricKey === "number_of_monthly_instagram_posts") return extractPostsTotal(row.number_of_monthly_instagram_posts);
   if (metricKey === "monthly_instagram_engagement") return extractEngagementTotal(row.monthly_instagram_engagement);
   return toNumberOrNull(row[metricKey]);
-}
-
-function ensureChartMetricOptions(force = false) {
-  const sel = document.getElementById("chartMetricSelect");
-  if (!sel) return;
-
-  if (force || sel.options.length === 0) {
-    const prev = sel.value;
-    sel.innerHTML = "";
-    for (const m of CHART_METRICS) {
-      const opt = document.createElement("option");
-      opt.value = m.key;
-      opt.textContent = m.label;
-      sel.appendChild(opt);
-    }
-    const want = prev && CHART_METRICS.some(x => x.key === prev) ? prev : (CHART_METRICS[0]?.key || "");
-    if (want) sel.value = want;
-  }
 }
 
 function destroyChart() {
@@ -751,8 +996,6 @@ function renderChart() {
   const sel = document.getElementById("chartMetricSelect");
   const modeLabel = document.getElementById("chartModeLabel");
   if (!canvas || !sel || typeof Chart === "undefined") return;
-
-  if (sel.options.length === 0) ensureChartMetricOptions(true);
 
   const metricKey = sel.value;
   if (!metricKey) return;
@@ -819,6 +1062,27 @@ function renderChart() {
   }
 }
 
+function ensureChartMetricOptions(force = false) {
+  const sel = document.getElementById("chartMetricSelect");
+  if (!sel) return;
+
+  if (force || sel.options.length === 0) {
+    const prev = sel.value;
+    sel.innerHTML = "";
+    for (const m of CHART_METRICS) {
+      const opt = document.createElement("option");
+      opt.value = m.key;
+      opt.textContent = m.label;
+      sel.appendChild(opt);
+    }
+    const want = prev && CHART_METRICS.some(x => x.key === prev) ? prev : (CHART_METRICS[0]?.key || "");
+    if (want) sel.value = want;
+  }
+}
+
+// -------------------------
+// Styling
+// -------------------------
 function applyMetricsTableStyling() {
   const root = document.getElementById("metricsDisplay");
   const table = root?.querySelector("table");
@@ -844,6 +1108,9 @@ function applyMetricsTableStyling() {
   });
 }
 
+// -------------------------
+// Refresh / load
+// -------------------------
 function refresh() {
   const mount = document.getElementById("metricsDisplay");
   mount.innerHTML = "";
@@ -867,8 +1134,6 @@ function refresh() {
     return;
   }
 
-  // NOTE: your existing buildMetricsTable function should be here in your current version.
-  // If you already have it in your working file, keep it unchanged.
   mount.appendChild(buildMetricsTable(visibleMonths, selected));
 
   ensureChartMetricOptions(false);
@@ -937,6 +1202,7 @@ async function init() {
   wireEditModals();
   ensureChartMetricOptions(true);
   wireChartDownloadButtons();
+  wireCompanyBulkButtons();
 
   const chartSelect = document.getElementById("chartMetricSelect");
   if (chartSelect) chartSelect.addEventListener("change", renderChart);
