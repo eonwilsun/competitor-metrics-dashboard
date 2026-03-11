@@ -120,17 +120,31 @@ async function xanoFetch(path, { method = "GET", body = null, withEditKey = true
 // -------------------------
 async function fetchEditKeyFromXano() {
   // IMPORTANT: app_config endpoint must be publicly readable for this to work.
-  // If it is not readable, you need a dedicated "verify password" endpoint in Xano.
+  // If the row doesn't exist or value is blank, return null (never allow unlock).
   const res = await xanoFetch(XANO_CONFIG_PATH, { method: "GET", withEditKey: false });
   const rows = Array.isArray(res) ? res : (res?.items || res?.data || []);
 
   const row = rows.find(r => String(r.key || "").trim() === EDIT_KEY_NAME);
-  return row?.value ? String(row.value) : "";
+
+  const value = row?.value;
+  if (value === null || value === undefined) return null;
+
+  const s = String(value).trim();
+  return s.length ? s : null;
 }
 
 async function verifyPassword(pw) {
   const actual = await fetchEditKeyFromXano();
-  return actual && String(pw) === actual;
+
+  // HARD FAIL: if we can't load the key, NEVER unlock
+  if (!actual) return false;
+
+  const entered = String(pw || "").trim();
+
+  // Require a non-empty user password too
+  if (!entered) return false;
+
+  return entered === actual;
 }
 
 // -------------------------
@@ -370,7 +384,7 @@ function buildMetricsTable(visibleMonths, companies) {
   trh.appendChild(el("th", { text: "Company" }));
   trh.appendChild(el("th", { text: "Month(s)" }));
 
-  for (const f of METRIC_FIELDS) trh.appendChild(el("th", { text: f.label })); // includes agency fee cols
+  for (const f of METRIC_FIELDS) trh.appendChild(el("th", { text: f.label }));
   trh.appendChild(el("th", { text: "Notes" }));
 
   thead.appendChild(trh);
@@ -384,7 +398,6 @@ function buildMetricsTable(visibleMonths, companies) {
     tr.appendChild(el("td", { text: companyName }));
     tr.appendChild(el("td", { text: singleMonth ? visibleMonths[0] : `${visibleMonths.length} months` }));
 
-    // Metric cells
     for (const f of METRIC_FIELDS) {
       let displayValue = null;
       let editTargetRow = null;
@@ -428,7 +441,6 @@ function buildMetricsTable(visibleMonths, companies) {
       tr.appendChild(td);
     }
 
-    // Notes cell
     const notesTd = el("td");
     const notesWrap = el("div", { style: "display:flex; gap:8px; align-items:flex-start;" });
 
@@ -492,7 +504,6 @@ function refresh() {
   }
 
   const visibleMonths = getRangeMonths(state.latestMonthKey, state.timeRange);
-
   const allCompanies = uniqueCompanies(state.rows);
   const selected = allCompanies.filter(c => state.selectedCompanies.has(c));
 
@@ -580,9 +591,7 @@ async function reloadFromXanoAndRefresh() {
   const rows = await xanoFetch(XANO_TABLE_PATH, { method: "GET", withEditKey: false });
   const raw = Array.isArray(rows) ? rows : (rows?.items || rows?.data || []);
 
-  // Normalize to prevent object values rendering as NaN
   state.rows = raw.map(normalizeRow);
-
   state.latestMonthKey = computeLatestMonthKey(state.rows);
 
   const companies = uniqueCompanies(state.rows);
@@ -622,10 +631,9 @@ async function attemptUnlock(password) {
     throw new Error("Incorrect password.");
   }
 
-  // Store the password for PATCH edits
+  // Store password as edit key for PATCH edits
   setEditKey(password);
 
-  // Load data
   await reloadFromXanoAndRefresh();
 }
 
