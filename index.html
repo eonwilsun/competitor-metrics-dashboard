@@ -25,12 +25,56 @@
       border-radius: 8px;
       font-size: 14px;
       margin-top: 8px;
+      box-sizing: border-box;
     }
     .lockscreen .actions {
       margin-top: 12px;
       display: flex;
       gap: 8px;
       justify-content: flex-end;
+    }
+
+    /* Time-range UI */
+    .range-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .range-box {
+      border: 1px solid #e6e6e6;
+      border-radius: 10px;
+      padding: 10px;
+      background: #fff;
+    }
+    .range-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 6px;
+      align-items: center;
+    }
+    .range-row select {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #d0d0d0;
+      border-radius: 8px;
+      font-size: 14px;
+      box-sizing: border-box;
+      background: #fff;
+    }
+    .quick-row {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      margin-top: 8px;
+      flex-wrap: wrap;
+    }
+    .quick-row label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      user-select: none;
     }
 
     /* Minimal modal styles (for editing numbers) */
@@ -80,6 +124,7 @@
       border: 1px solid #d0d0d0;
       border-radius: 8px;
       font-size: 14px;
+      box-sizing: border-box;
     }
     .clickable-metric {
       cursor: pointer;
@@ -121,15 +166,38 @@
     <!-- App -->
     <section id="appRoot" class="hidden">
       <section class="controls" id="controls">
+
+        <!-- UPDATED Time Range block -->
         <div class="control-block">
           <h2>Time Range</h2>
-          <label for="timeRange">Select Time Range:</label>
-          <select id="timeRange">
-            <option value="thisMonth">This Month</option>
-            <option value="lastMonth">Last Month</option>
-            <option value="last6Months">Last 6 Months</option>
-            <option value="lastYear">Last Year</option>
-          </select>
+          <p class="muted" style="margin-top:-4px;">Choose a custom start/end month, or use quick picks.</p>
+
+          <div class="quick-row">
+            <label><input type="checkbox" id="quickThisMonth" /> This Month</label>
+            <label><input type="checkbox" id="quickLastMonth" /> Last Month</label>
+          </div>
+
+          <div class="range-grid">
+            <div class="range-box">
+              <div style="font-weight:700;">Start</div>
+              <div class="range-row">
+                <select id="startYear"></select>
+                <select id="startMonth"></select>
+              </div>
+            </div>
+
+            <div class="range-box">
+              <div style="font-weight:700;">End</div>
+              <div class="range-row">
+                <select id="endYear"></select>
+                <select id="endMonth"></select>
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top:10px;">
+            <button id="applyRange" type="button">Apply Range</button>
+          </div>
         </div>
 
         <div class="control-block">
