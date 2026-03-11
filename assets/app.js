@@ -74,10 +74,66 @@ const MONTHS = {
   december: "12"
 };
 
+const MONTH_LABELS = [
+  { name: "January", value: "01" },
+  { name: "February", value: "02" },
+  { name: "March", value: "03" },
+  { name: "April", value: "04" },
+  { name: "May", value: "05" },
+  { name: "June", value: "06" },
+  { name: "July", value: "07" },
+  { name: "August", value: "08" },
+  { name: "September", value: "09" },
+  { name: "October", value: "10" },
+  { name: "November", value: "11" },
+  { name: "December", value: "12" }
+];
+
 function monthKeyFromYearMonthName(year, monthName) {
   const mm = MONTHS[String(monthName || "").toLowerCase()];
   if (!mm) return null;
   return `${year}-${mm}`;
+}
+
+function monthKeyFromYYYYMMParts(year, mm) {
+  const y = String(year).trim();
+  const m = String(mm).padStart(2, "0");
+  return `${y}-${m}`;
+}
+
+function parseMonthKey(mk) {
+  // mk is "YYYY-MM"
+  if (!mk || typeof mk !== "string" || mk.length < 7) return null;
+  const [y, m] = mk.split("-");
+  if (!y || !m) return null;
+  return { year: Number(y), month: String(m).padStart(2, "0") };
+}
+
+function compareMonthKey(a, b) {
+  // lexical works for YYYY-MM
+  return String(a).localeCompare(String(b));
+}
+
+function listMonthKeysBetween(startKey, endKey) {
+  // Inclusive list from startKey to endKey (YYYY-MM)
+  const s = parseMonthKey(startKey);
+  const e = parseMonthKey(endKey);
+  if (!s || !e) return [];
+
+  const start = new Date(Date.UTC(s.year, Number(s.month) - 1, 1));
+  const end = new Date(Date.UTC(e.year, Number(e.month) - 1, 1));
+
+  if (start > end) return [];
+
+  const out = [];
+  const cur = new Date(start);
+  while (cur <= end) {
+    const yyyy = cur.getUTCFullYear();
+    const mm = String(cur.getUTCMonth() + 1).padStart(2, "0");
+    out.push(`${yyyy}-${mm}`);
+    cur.setUTCMonth(cur.getUTCMonth() + 1);
+  }
+  return out;
 }
 
 function getEditKey() {
@@ -95,7 +151,6 @@ function clearEditKey() {
 async function xanoFetch(path, { method = "GET", body = null, withEditKey = true } = {}) {
   const headers = { "Content-Type": "application/json" };
 
-  // Only attach x-edit-key if requested
   if (withEditKey) {
     const key = getEditKey();
     if (key) headers["x-edit-key"] = key;
@@ -119,8 +174,6 @@ async function xanoFetch(path, { method = "GET", body = null, withEditKey = true
 // Password verification (uses app_config EDIT_KEY)
 // -------------------------
 async function fetchEditKeyFromXano() {
-  // IMPORTANT: app_config endpoint must be publicly readable for this to work.
-  // If the row doesn't exist or value is blank, return null (never allow unlock).
   const res = await xanoFetch(XANO_CONFIG_PATH, { method: "GET", withEditKey: false });
   const rows = Array.isArray(res) ? res : (res?.items || res?.data || []);
 
@@ -135,64 +188,29 @@ async function fetchEditKeyFromXano() {
 
 async function verifyPassword(pw) {
   const actual = await fetchEditKeyFromXano();
-
-  // HARD FAIL: if we can't load the key, NEVER unlock
   if (!actual) return false;
 
   const entered = String(pw || "").trim();
-
-  // Require a non-empty user password too
   if (!entered) return false;
 
   return entered === actual;
 }
 
 // -------------------------
-// Time range logic
-// -------------------------
-function getRangeMonths(latestMonth, range) {
-  const [y, m] = latestMonth.split("-").map(Number);
-  const latest = new Date(Date.UTC(y, m - 1, 1));
-
-  const months = [];
-  const pushMonth = (dt) => {
-    const yyyy = dt.getUTCFullYear();
-    const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
-    months.push(`${yyyy}-${mm}`);
-  };
-
-  if (range === "thisMonth") {
-    pushMonth(latest);
-    return months;
-  }
-
-  if (range === "lastMonth") {
-    const dt = new Date(latest);
-    dt.setUTCMonth(dt.getUTCMonth() - 1);
-    pushMonth(dt);
-    return months;
-  }
-
-  let count = 1;
-  if (range === "last6Months") count = 6;
-  if (range === "lastYear") count = 12;
-
-  for (let i = 0; i < count; i++) {
-    const dt = new Date(latest);
-    dt.setUTCMonth(dt.getUTCMonth() - i);
-    pushMonth(dt);
-  }
-  return months;
-}
-
-// -------------------------
 // App state
 // -------------------------
 const state = {
-  timeRange: "thisMonth",
+  // Time selection state:
+  // - visibleMonths is the concrete list of YYYY-MM keys currently shown (the single source of truth)
+  visibleMonths: [],
+
+  // UI form values (custom range)
+  rangeStartKey: null,
+  rangeEndKey: null,
+
   selectedCompanies: new Set(),
   rows: [],              // normalized rows
-  latestMonthKey: null   // YYYY-MM
+  latestMonthKey: null   // YYYY-MM from data
 };
 
 // -------------------------
@@ -252,12 +270,6 @@ function findRowByCompanyAndMonth(companyName, monthKey) {
   });
 }
 
-/**
- * Normalize rows coming from Xano so we never try to render objects as numbers.
- * - agency_fee_one_child: object -> two numeric fields (weekly/yearly)
- * - number_of_monthly_instagram_posts: object -> number (prefer total else sum values)
- * - monthly_instagram_engagement: object -> number (prefer total_engagement/total else sum values)
- */
 function normalizeRow(row) {
   const r = { ...row };
 
@@ -422,7 +434,7 @@ function buildMetricsTable(visibleMonths, companies) {
       const span = el("span", {
         className: `clickable-metric${isEmpty ? " muted-cell" : ""}`,
         text: formatValue(displayValue, f.format),
-        title: singleMonth ? "Click to edit" : "Switch to This Month/Last Month to edit"
+        title: singleMonth ? "Click to edit" : "Switch to a single month to edit"
       });
 
       if (singleMonth && editTargetRow) {
@@ -503,7 +515,8 @@ function refresh() {
     return;
   }
 
-  const visibleMonths = getRangeMonths(state.latestMonthKey, state.timeRange);
+  const visibleMonths = state.visibleMonths.length ? state.visibleMonths : [state.latestMonthKey];
+
   const allCompanies = uniqueCompanies(state.rows);
   const selected = allCompanies.filter(c => state.selectedCompanies.has(c));
 
@@ -522,7 +535,7 @@ function refresh() {
 // Export
 // -------------------------
 function exportVisibleToCsv() {
-  const visibleMonths = getRangeMonths(state.latestMonthKey, state.timeRange);
+  const visibleMonths = state.visibleMonths.length ? state.visibleMonths : [state.latestMonthKey];
   const allCompanies = uniqueCompanies(state.rows);
   const selected = allCompanies.filter(c => state.selectedCompanies.has(c));
 
@@ -585,6 +598,94 @@ function downloadBlob(filename, mime, content) {
 }
 
 // -------------------------
+// Time-range UI wiring
+// -------------------------
+function fillMonthSelect(selectEl) {
+  selectEl.innerHTML = "";
+  for (const m of MONTH_LABELS) {
+    const opt = document.createElement("option");
+    opt.value = m.value;
+    opt.textContent = m.name;
+    selectEl.appendChild(opt);
+  }
+}
+
+function fillYearSelect(selectEl, minYear, maxYear) {
+  selectEl.innerHTML = "";
+  for (let y = minYear; y <= maxYear; y++) {
+    const opt = document.createElement("option");
+    opt.value = String(y);
+    opt.textContent = String(y);
+    selectEl.appendChild(opt);
+  }
+}
+
+function setRangeSelectorsFromKeys(startKey, endKey) {
+  const s = parseMonthKey(startKey);
+  const e = parseMonthKey(endKey);
+  if (!s || !e) return;
+
+  document.getElementById("startYear").value = String(s.year);
+  document.getElementById("startMonth").value = s.month;
+  document.getElementById("endYear").value = String(e.year);
+  document.getElementById("endMonth").value = e.month;
+}
+
+function applyCustomRangeFromSelectors() {
+  const sy = document.getElementById("startYear").value;
+  const sm = document.getElementById("startMonth").value;
+  const ey = document.getElementById("endYear").value;
+  const em = document.getElementById("endMonth").value;
+
+  const startKey = monthKeyFromYYYYMMParts(sy, sm);
+  const endKey = monthKeyFromYYYYMMParts(ey, em);
+
+  // If reversed, block
+  if (compareMonthKey(startKey, endKey) > 0) {
+    alert("Start month must be before (or the same as) End month.");
+    return;
+  }
+
+  // turn off quick ticks because user chose a custom range
+  document.getElementById("quickThisMonth").checked = false;
+  document.getElementById("quickLastMonth").checked = false;
+
+  state.rangeStartKey = startKey;
+  state.rangeEndKey = endKey;
+  state.visibleMonths = listMonthKeysBetween(startKey, endKey);
+
+  refresh();
+}
+
+function setQuickThisMonth() {
+  document.getElementById("quickLastMonth").checked = false;
+
+  state.rangeStartKey = state.latestMonthKey;
+  state.rangeEndKey = state.latestMonthKey;
+  state.visibleMonths = [state.latestMonthKey];
+
+  setRangeSelectorsFromKeys(state.latestMonthKey, state.latestMonthKey);
+  refresh();
+}
+
+function setQuickLastMonth() {
+  document.getElementById("quickThisMonth").checked = false;
+
+  const { year, month } = parseMonthKey(state.latestMonthKey);
+  const dt = new Date(Date.UTC(year, Number(month) - 1, 1));
+  dt.setUTCMonth(dt.getUTCMonth() - 1);
+
+  const lastKey = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}`;
+
+  state.rangeStartKey = lastKey;
+  state.rangeEndKey = lastKey;
+  state.visibleMonths = [lastKey];
+
+  setRangeSelectorsFromKeys(lastKey, lastKey);
+  refresh();
+}
+
+// -------------------------
 // Lock screen / init
 // -------------------------
 async function reloadFromXanoAndRefresh() {
@@ -596,6 +697,7 @@ async function reloadFromXanoAndRefresh() {
 
   const companies = uniqueCompanies(state.rows);
 
+  // default: all companies selected first load
   if (state.selectedCompanies.size === 0) {
     companies.forEach(c => state.selectedCompanies.add(c));
   } else {
@@ -606,6 +708,14 @@ async function reloadFromXanoAndRefresh() {
 
   renderCompanyToggles(companies);
   renderDatasetToggles();
+
+  // If no visible months chosen yet, default to latest month.
+  if (!state.visibleMonths.length && state.latestMonthKey) {
+    state.visibleMonths = [state.latestMonthKey];
+    state.rangeStartKey = state.latestMonthKey;
+    state.rangeEndKey = state.latestMonthKey;
+  }
+
   refresh();
 }
 
@@ -627,24 +737,22 @@ function setLockedUI(locked) {
 
 async function attemptUnlock(password) {
   const ok = await verifyPassword(password);
-  if (!ok) {
-    throw new Error("Incorrect password.");
-  }
+  if (!ok) throw new Error("Incorrect password.");
 
-  // Store password as edit key for PATCH edits
   setEditKey(password);
-
   await reloadFromXanoAndRefresh();
 }
 
 async function init() {
   wireEditMetricModal();
 
-  document.getElementById("timeRange").addEventListener("change", (e) => {
-    state.timeRange = e.target.value;
-    refresh();
+  // Wire exports
+  document.getElementById("exportCsv").addEventListener("click", exportVisibleToCsv);
+  document.getElementById("exportXlsx").addEventListener("click", () => {
+    alert("Excel export can be added next. CSV export is enabled now.");
   });
 
+  // Company bulk actions
   document.getElementById("companiesAllOn").addEventListener("click", () => {
     uniqueCompanies(state.rows).forEach(c => state.selectedCompanies.add(c));
     renderCompanyToggles(uniqueCompanies(state.rows));
@@ -657,19 +765,13 @@ async function init() {
     refresh();
   });
 
-  document.getElementById("datasetsAllOn").addEventListener("click", () => {});
-  document.getElementById("datasetsAllOff").addEventListener("click", () => {});
-
-  document.getElementById("exportCsv").addEventListener("click", exportVisibleToCsv);
-  document.getElementById("exportXlsx").addEventListener("click", () => {
-    alert("Excel export can be added next. CSV export is enabled now.");
-  });
-
+  // Lock
   document.getElementById("lockBtn").addEventListener("click", () => {
     clearEditKey();
     setLockedUI(true);
   });
 
+  // Unlock
   document.getElementById("unlockBtn").addEventListener("click", async () => {
     const pw = document.getElementById("pagePassword").value;
     const errMount = document.getElementById("lockError");
@@ -678,25 +780,37 @@ async function init() {
     try {
       await attemptUnlock(pw);
       setLockedUI(false);
+
+      // Once unlocked, initialize time-range controls based on data
+      const minYear = Math.min(...state.visibleMonths.map(m => Number(m.split("-")[0])));
+      const maxYear = Math.max(...state.visibleMonths.map(m => Number(m.split("-")[0])), Number(state.latestMonthKey.split("-")[0]));
+
+      fillYearSelect(document.getElementById("startYear"), minYear, maxYear);
+      fillYearSelect(document.getElementById("endYear"), minYear, maxYear);
+      fillMonthSelect(document.getElementById("startMonth"));
+      fillMonthSelect(document.getElementById("endMonth"));
+
+      setRangeSelectorsFromKeys(state.rangeStartKey, state.rangeEndKey);
+
+      // Apply custom range button
+      document.getElementById("applyRange").addEventListener("click", applyCustomRangeFromSelectors);
+
+      // Quick ticks
+      document.getElementById("quickThisMonth").addEventListener("change", (e) => {
+        if (e.target.checked) setQuickThisMonth();
+      });
+      document.getElementById("quickLastMonth").addEventListener("change", (e) => {
+        if (e.target.checked) setQuickLastMonth();
+      });
+
     } catch (err) {
       clearEditKey();
       errMount.textContent = `Unlock failed: ${String(err?.message || err)}`;
     }
   });
 
-  // Auto-unlock if key exists in session
-  const existing = getEditKey();
-  if (existing) {
-    try {
-      await attemptUnlock(existing);
-      setLockedUI(false);
-    } catch {
-      clearEditKey();
-      setLockedUI(true);
-    }
-  } else {
-    setLockedUI(true);
-  }
+  // Default to locked
+  setLockedUI(true);
 }
 
 function showFatal(err) {
