@@ -17,21 +17,22 @@ const METRIC_FIELDS = [
   { key: "organic_traffic", label: "Organic Traffic (est.)", format: "int" },
   { key: "instagram_followers", label: "Followers", format: "int" },
 
-  // Display-only derived strings (single-month display)
+  // display-only strings (single-month)
   { key: "number_of_monthly_instagram_posts_display", label: "Posts / month", format: "richtext" },
   { key: "monthly_instagram_engagement_display", label: "Engagements / month", format: "richtext" },
 
+  // derived from agency_fee_one_child object
   { key: "agency_fee_one_child_weekly", label: "Agency Fee (1 child) / week", format: "int" },
   { key: "agency_fee_one_child_yearly", label: "Agency Fee (1 child) / year", format: "int" },
 
   { key: "meta_ads_running", label: "Meta Ads Running", format: "int" },
 
+  // editable rich text
   { key: "monthly_press_coverage", label: "Monthly Press Coverage", format: "richtext", editable: true }
 ];
 
 const NOTES_FIELD_KEY = "notes";
 
-// For charting
 const CHART_METRICS = [
   { key: "domain_authority", label: "Authority Score" },
   { key: "number_of_referring_domains", label: "Referring Domains" },
@@ -62,9 +63,9 @@ function companySort(a, b) {
   return aa.localeCompare(bb);
 }
 
-// Exact brand colors you requested (plus Swiis orange)
+// UPDATED per request: Swiis = #ef5d2f
 const COMPANY_COLORS = {
-  swiis: "#f59e0b",
+  swiis: "#ef5d2f",
   capstone: "#0d66a2",
   compass: "#1897d3",
   fca: "#f27a30",
@@ -78,6 +79,7 @@ function companyColor(company) {
   const key = normalizeCompanyName(company).toLowerCase();
   if (COMPANY_COLORS[key]) return COMPANY_COLORS[key];
 
+  // fallback deterministic color
   let hash = 0;
   for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
   const hue = hash % 360;
@@ -162,17 +164,22 @@ function pickNumberFromObject(obj, keys) {
   return null;
 }
 
+// UPDATED per request: label "Images" (not "Graphic images"), and uses Xano key image_graphic
 function formatPostsBreakdown(obj) {
   if (!obj || typeof obj !== "object") return null;
 
-  const graphic = pickNumberFromObject(obj, [
+  const images = pickNumberFromObject(obj, [
     "image_graphic",
     "Image Graphic",
     "imageGraphic",
     "graphic_image",
     "Graphic Image",
     "graphic",
-    "Graphic"
+    "Graphic",
+    "Image",
+    "image",
+    "Images",
+    "images"
   ]);
 
   const reels = pickNumberFromObject(obj, [
@@ -191,7 +198,7 @@ function formatPostsBreakdown(obj) {
   ]);
 
   const parts = [];
-  if (graphic !== null) parts.push(`Graphic images: ${graphic.toLocaleString()}`);
+  if (images !== null) parts.push(`Images: ${images.toLocaleString()}`);
   if (reels !== null) parts.push(`Reels: ${reels.toLocaleString()}`);
   if (total !== null) parts.push(`Total: ${total.toLocaleString()}`);
 
@@ -236,6 +243,7 @@ const MONTHS = {
   may: "05", june: "06", july: "07", august: "08",
   september: "09", october: "10", november: "11", december: "12"
 };
+
 const MONTH_LABELS = [
   { name: "January", value: "01" }, { name: "February", value: "02" }, { name: "March", value: "03" },
   { name: "April", value: "04" }, { name: "May", value: "05" }, { name: "June", value: "06" },
@@ -248,17 +256,21 @@ function monthKeyFromYearMonthName(year, monthName) {
   if (!mm) return null;
   return `${year}-${mm}`;
 }
+
 function monthKeyFromYYYYMMParts(year, mm) {
   return `${String(year).trim()}-${String(mm).padStart(2, "0")}`;
 }
+
 function parseMonthKey(mk) {
   if (!mk || typeof mk !== "string" || mk.length < 7) return null;
   const [y, m] = mk.split("-");
   return { year: Number(y), month: String(m).padStart(2, "0") };
 }
+
 function compareMonthKey(a, b) {
   return String(a).localeCompare(String(b));
 }
+
 function listMonthKeysBetween(startKey, endKey) {
   const s = parseMonthKey(startKey);
   const e = parseMonthKey(endKey);
@@ -281,6 +293,7 @@ function currentMonthKeyUTC() {
   const now = new Date();
   return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
 }
+
 function previousMonthKeyUTC(monthKey) {
   const p = parseMonthKey(monthKey);
   if (!p) return null;
@@ -316,6 +329,7 @@ async function xanoFetch(path, { method = "GET", body = null, withEditKey = true
   return await res.json();
 }
 
+// password check
 async function fetchEditKeyFromXano() {
   const res = await xanoFetch(XANO_CONFIG_PATH, { method: "GET", withEditKey: false });
   const rows = Array.isArray(res) ? res : (res?.items || res?.data || []);
@@ -325,6 +339,7 @@ async function fetchEditKeyFromXano() {
   const s = String(value).trim();
   return s.length ? s : null;
 }
+
 async function verifyPassword(pw) {
   const actual = await fetchEditKeyFromXano();
   if (!actual) return false;
@@ -352,15 +367,13 @@ function computeLatestMonthKey(rows) {
   const keys = rows.map(r => monthKeyFromYearMonthName(r.year, r.month)).filter(Boolean).sort();
   return keys[keys.length - 1] || null;
 }
+
 function computeMinMaxMonthKey(rows) {
   const keys = rows.map(r => monthKeyFromYearMonthName(r.year, r.month)).filter(Boolean).sort();
   return { min: keys[0] || null, max: keys[keys.length - 1] || null };
 }
 
-// -------------------------
-// IMPORTANT FIX: uniqueCompanies() was missing -> unlock broke.
-// This is the direct cause of: "Unlock failed: uniqueCompanies is not defined"
-// -------------------------
+// Swiis-first company list
 function uniqueCompanies(rows) {
   const set = new Set(rows.map(r => normalizeCompanyName(r.company)).filter(Boolean));
   return Array.from(set).sort(companySort);
@@ -373,20 +386,27 @@ function renderCompanyToggles(companies) {
     const id = `cmp_${name.replace(/\s+/g, "_")}`;
     const checkbox = el("input", { type: "checkbox", id });
     checkbox.checked = state.selectedCompanies.has(name);
+
     checkbox.addEventListener("change", () => {
       checkbox.checked ? state.selectedCompanies.add(name) : state.selectedCompanies.delete(name);
       refresh();
     });
-    mount.appendChild(el("div", { className: "toggle" }, [checkbox, el("label", { for: id, text: name })]));
+
+    mount.appendChild(el("div", { className: "toggle" }, [
+      checkbox,
+      el("label", { for: id, text: name })
+    ]));
   }
 }
 
 function renderDatasetToggles() {
   const mount = document.getElementById("datasetToggle");
   mount.innerHTML = "";
+
   const checkbox = el("input", { type: "checkbox", id: "allMetrics" });
   checkbox.checked = true;
   checkbox.disabled = true;
+
   mount.appendChild(el("div", { className: "toggle" }, [
     checkbox,
     el("label", { for: "allMetrics", text: "All metrics (from Xano table fields)" })
@@ -397,18 +417,21 @@ function findRowByCompanyAndMonth(companyName, monthKey) {
   return state.rows.find(r => String(r.company) === String(companyName) && monthKeyFromYearMonthName(r.year, r.month) === monthKey);
 }
 
+// Normalize rows
 function normalizeRow(row) {
   const r = { ...row };
 
-  // Agency fee object -> numeric fields
+  // agency fee derived
   const feeObj = r.agency_fee_one_child;
   if (feeObj && typeof feeObj === "object") {
     r.agency_fee_one_child_weekly = toNumberOrNull(feeObj.Weekly ?? feeObj.weekly);
     r.agency_fee_one_child_yearly = toNumberOrNull(feeObj.Yearly ?? feeObj.yearly);
   }
 
+  // press coverage
   r.monthly_press_coverage = normalizeText(r.monthly_press_coverage);
 
+  // instagram display strings
   r.number_of_monthly_instagram_posts_display =
     formatPostsBreakdown(r.number_of_monthly_instagram_posts) ??
     (toNumberOrNull(r.number_of_monthly_instagram_posts) !== null ? Number(r.number_of_monthly_instagram_posts).toLocaleString() : null);
@@ -421,36 +444,11 @@ function normalizeRow(row) {
 }
 
 // -------------------------
-// Notes popup modal (NEW)
-// -------------------------
-let editNotesModalState = null;
-
-function openEditNotesModal({ row, monthKey }) {
-  editNotesModalState = { row, monthKey };
-
-  const backdrop = document.getElementById("editTextModalBackdrop");
-  const title = document.getElementById("editTextSubtitle");
-  const hint = document.getElementById("editTextHint");
-  const textarea = document.getElementById("editTextNewValue");
-  const updateBtn = document.getElementById("editTextUpdate");
-
-  title.textContent = `${row.company} • ${monthKey} • Notes`;
-  hint.textContent = "Edit notes (multi-line). Saved to Xano.";
-  textarea.value = row?.[NOTES_FIELD_KEY] ?? "";
-
-  // Mark that this modal is being used for NOTES
-  updateBtn.dataset.mode = "notes";
-
-  backdrop.style.display = "flex";
-  backdrop.setAttribute("aria-hidden", "false");
-  setTimeout(() => textarea.focus(), 0);
-}
-
-// -------------------------
-// Existing modals
+// Modals
 // -------------------------
 let editModalState = null;
 let editTextModalState = null;
+let editNotesModalState = null;
 
 function openEditMetricModal({ row, fieldKey, fieldLabel, currentValue, monthKey }) {
   editModalState = { row, fieldKey, monthKey };
@@ -481,15 +479,31 @@ function openEditTextModal({ row, fieldKey, fieldLabel, currentValue, monthKey }
   document.getElementById("editTextSubtitle").textContent = `${row.company} • ${monthKey} • ${fieldLabel}`;
   document.getElementById("editTextHint").textContent = "Multiple lines supported. URLs will be clickable after saving.";
 
-  const input = document.getElementById("editTextNewValue");
-  input.value = (currentValue === null || currentValue === undefined) ? "" : String(currentValue);
+  const textarea = document.getElementById("editTextNewValue");
+  textarea.value = (currentValue === null || currentValue === undefined) ? "" : String(currentValue);
 
-  // Mark that this modal is being used for PRESS COVERAGE
   document.getElementById("editTextUpdate").dataset.mode = "press";
 
   backdrop.style.display = "flex";
   backdrop.setAttribute("aria-hidden", "false");
-  setTimeout(() => input.focus(), 0);
+  setTimeout(() => textarea.focus(), 0);
+}
+
+function openEditNotesModal({ row, monthKey }) {
+  editNotesModalState = { row, monthKey };
+
+  const backdrop = document.getElementById("editTextModalBackdrop");
+  document.getElementById("editTextSubtitle").textContent = `${row.company} • ${monthKey} • Notes`;
+  document.getElementById("editTextHint").textContent = "Edit notes (multi-line). Saved to Xano.";
+
+  const textarea = document.getElementById("editTextNewValue");
+  textarea.value = row?.[NOTES_FIELD_KEY] ?? "";
+
+  document.getElementById("editTextUpdate").dataset.mode = "notes";
+
+  backdrop.style.display = "flex";
+  backdrop.setAttribute("aria-hidden", "false");
+  setTimeout(() => textarea.focus(), 0);
 }
 
 function closeEditTextModal() {
@@ -543,13 +557,11 @@ function wireEditModals() {
 
     if (mode === "press") {
       if (!editTextModalState?.row?.id) return alert("Missing record id.");
-
       await xanoFetch(`${XANO_TABLE_PATH}/${editTextModalState.row.id}`, {
         method: "PATCH",
         body: { monthly_press_coverage: payloadVal },
         withEditKey: true
       });
-
       closeEditTextModal();
       await reloadFromXanoAndRefresh();
       return;
@@ -557,13 +569,11 @@ function wireEditModals() {
 
     if (mode === "notes") {
       if (!editNotesModalState?.row?.id) return alert("Missing record id.");
-
       await xanoFetch(`${XANO_TABLE_PATH}/${editNotesModalState.row.id}`, {
         method: "PATCH",
         body: { [NOTES_FIELD_KEY]: payloadVal },
         withEditKey: true
       });
-
       closeEditTextModal();
       await reloadFromXanoAndRefresh();
       return;
@@ -596,7 +606,7 @@ function averageNumericForCompanyAcrossMonths(companyName, monthKeys, fieldKey) 
 }
 
 // -------------------------
-// Table rendering (UPDATED: Notes now like press coverage, click-to-edit popup)
+// Table rendering
 // -------------------------
 function buildMetricsTable(visibleMonths, companies) {
   const table = el("table");
@@ -635,10 +645,11 @@ function buildMetricsTable(visibleMonths, companies) {
 
       const td = el("td");
 
+      // richtext columns
       if (f.format === "richtext") {
         const html = displayValue ? linkifyTextToHtml(displayValue) : "—";
         const div = el("div", {
-          className: `clickable-metric${(!displayValue ? " muted-cell" : "")}`,
+          className: `clickable-metric metrics-rich${(!displayValue ? " muted-cell" : "")}`,
           html,
           title: singleMonth ? "Click to edit" : "Shown only in single-month view"
         });
@@ -660,9 +671,10 @@ function buildMetricsTable(visibleMonths, companies) {
         continue;
       }
 
+      // int columns
       const isEmpty = displayValue === null || displayValue === undefined || displayValue === "";
       const span = el("span", {
-        className: `clickable-metric${isEmpty ? " muted-cell" : ""}`,
+        className: `clickable-metric metrics-num${isEmpty ? " muted-cell" : ""}`,
         text: formatValue(displayValue, f.format),
         title: singleMonth ? "Click to edit" : "Averaged across selected months"
       });
@@ -683,9 +695,8 @@ function buildMetricsTable(visibleMonths, companies) {
       tr.appendChild(td);
     }
 
-    // Notes cell -> richtext-like preview + click-to-edit popup (NO boxes)
+    // Notes: preview + click to popup (no textarea boxes)
     const notesTd = el("td");
-
     let notesRow = null;
     let mk = null;
     if (singleMonth) {
@@ -697,7 +708,7 @@ function buildMetricsTable(visibleMonths, companies) {
     const notesPreview = normalizeText(notesText) ? linkifyTextToHtml(notesText) : "—";
 
     const notesDiv = el("div", {
-      className: `clickable-metric${(normalizeText(notesText) ? "" : " muted-cell")}`,
+      className: `clickable-metric metrics-rich${(normalizeText(notesText) ? "" : " muted-cell")}`,
       html: notesPreview,
       title: singleMonth ? "Click to edit notes" : "Switch to a single month to edit notes"
     });
@@ -854,6 +865,9 @@ function refresh() {
   mount.appendChild(buildMetricsTable(visibleMonths, selected));
   ensureChartMetricOptions(false);
   renderChart();
+
+  // Apply metrics table styling without relying on :has()
+  applyMetricsTableStyling();
 }
 
 async function reloadFromXanoAndRefresh() {
@@ -901,18 +915,15 @@ function setLockedUI(locked) {
 
 async function attemptUnlock(password) {
   setEditKey(password);
-
-  // Verify password against app_config
   const ok = await verifyPassword(password);
   if (!ok) {
     clearEditKey();
     throw new Error("Incorrect password.");
   }
-
   await reloadFromXanoAndRefresh();
 }
 
-// Time-range UI (same behavior as you already had wired in index.html)
+// Time-range UI
 function fillMonthSelect(selectEl) {
   selectEl.innerHTML = "";
   for (const m of MONTH_LABELS) {
@@ -974,6 +985,41 @@ function setQuickLastMonth() {
   refresh();
 }
 
+// -------------------------
+// Metrics table styling (no underlines + centered numeric cells)
+// -------------------------
+function applyMetricsTableStyling() {
+  const root = document.getElementById("metricsDisplay");
+  const table = root?.querySelector("table");
+  if (!table) return;
+
+  // remove underlines globally in metrics display
+  root.querySelectorAll(".clickable-metric").forEach((n) => {
+    n.style.textDecoration = "none";
+  });
+
+  // center ALL cells by default
+  table.querySelectorAll("td").forEach((td) => {
+    td.style.textAlign = "center";
+    td.style.verticalAlign = "middle";
+  });
+
+  // company + month left
+  table.querySelectorAll("tr").forEach((tr) => {
+    const tds = tr.querySelectorAll("td");
+    if (tds[0]) tds[0].style.textAlign = "left";
+    if (tds[1]) tds[1].style.textAlign = "left";
+  });
+
+  // any cell with rich text (div.metrics-rich) should be left aligned
+  table.querySelectorAll("td").forEach((td) => {
+    if (td.querySelector(".metrics-rich")) td.style.textAlign = "left";
+  });
+}
+
+// -------------------------
+// Init
+// -------------------------
 async function init() {
   wireEditModals();
   ensureChartMetricOptions(true);
