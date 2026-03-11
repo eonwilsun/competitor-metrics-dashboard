@@ -172,10 +172,6 @@ function readPostsImages(row) {
 function readPostsReels(row) {
   return toNumberOrNull(getObj(row?.number_of_monthly_instagram_posts).reels_video);
 }
-function readPostsTotal(row) {
-  return toNumberOrNull(getObj(row?.number_of_monthly_instagram_posts).number_of_monthly_instagram_posts_total);
-}
-
 function derivePostsTotal(images, reels) {
   return (toNumberOrNull(images) ?? 0) + (toNumberOrNull(reels) ?? 0);
 }
@@ -323,7 +319,8 @@ const state = {
   maxMonthKey: null,
   selectedCompanies: new Set(),
   rows: [],
-  latestMonthKey: null
+  latestMonthKey: null,
+  lastLoadedAtUtc: null
 };
 
 function computeLatestMonthKey(rows) {
@@ -424,7 +421,7 @@ function buildPatchBodyForMetric(row, fieldKey, rawNum) {
     return { [rootKey]: next };
   }
 
-  // Total is derived -> do not allow PATCH
+  // Total is derived -> no PATCH from UI
   if (fieldKey === "posts_total") return null;
 
   // Engagement: editable total + rate
@@ -439,8 +436,156 @@ function buildPatchBodyForMetric(row, fieldKey, rawNum) {
     return { [rootKey]: next };
   }
 
-  // Default: patch top-level numeric fields
+  // Default: patch top-level numeric fields (rounded)
   return { [fieldKey]: Math.round(num) };
+}
+
+// -------------------------
+// Last-updated + chart download UI helpers (NO HTML changes needed)
+// -------------------------
+function formatUtcTimestamp(dt) {
+  const yyyy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getUTCDate()).padStart(2, "0");
+  const hh = String(dt.getUTCHours()).padStart(2, "0");
+  const mi = String(dt.getUTCMinutes()).padStart(2, "0");
+  const ss = String(dt.getUTCSeconds()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss} UTC`;
+}
+
+function ensureLastUpdatedRightOfViewingInfo() {
+  const host = document.getElementById("lastUpdated");
+  if (!host) return;
+
+  // Turn host into a flex row: left = existing text, right = last-updated timestamp
+  if (!host.dataset.enhanced) {
+    host.dataset.enhanced = "1";
+    host.style.display = "flex";
+    host.style.justifyContent = "space-between";
+    host.style.gap = "12px";
+
+    const left = document.createElement("span");
+    left.id = "viewingInfo";
+    left.style.flex = "1 1 auto";
+
+    const right = document.createElement("span");
+    right.id = "lastUpdatedAt";
+    right.style.flex = "0 0 auto";
+    right.style.whiteSpace = "nowrap";
+    right.style.opacity = "0.85";
+
+    // move existing text into left
+    left.textContent = host.textContent || "";
+    host.textContent = "";
+    host.appendChild(left);
+    host.appendChild(right);
+  }
+}
+
+function setViewingAndLastUpdatedText(viewingText) {
+  ensureLastUpdatedRightOfViewingInfo();
+
+  const left = document.getElementById("viewingInfo") || document.getElementById("lastUpdated");
+  if (left) left.textContent = viewingText;
+
+  const right = document.getElementById("lastUpdatedAt");
+  if (right) {
+    right.textContent = state.lastLoadedAtUtc
+      ? `Last updated: ${formatUtcTimestamp(state.lastLoadedAtUtc)}`
+      : "";
+  }
+}
+
+function downloadDataUrl(filename, dataUrl) {
+  const a = document.createElement("a");
+  a.href = dataUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function downloadChartAs(type) {
+  const canvas = document.getElementById("metricChart");
+  if (!canvas) return alert("Chart not found.");
+  const ext = type === "image/jpeg" ? "jpg" : "png";
+  const dataUrl = canvas.toDataURL(type, 0.92);
+  downloadDataUrl(`chart.${ext}`, dataUrl);
+}
+
+function downloadChartPdfViaPrint() {
+  const canvas = document.getElementById("metricChart");
+  if (!canvas) return alert("Chart not found.");
+
+  const img = canvas.toDataURL("image/png");
+  const w = window.open("", "_blank");
+  if (!w) return alert("Popup blocked. Allow popups to download PDF.");
+
+  w.document.open();
+  w.document.write(`
+<!doctype html>
+<html>
+  <head>
+    <title>Chart</title>
+    <style>
+      body { margin: 0; padding: 24px; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+      img { max-width: 100%; height: auto; }
+      .hint { margin-top: 12px; opacity: 0.7; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <img src="${img}" />
+    <div class="hint">Use your browser Print (Ctrl+P) and choose “Save as PDF”.</div>
+  </body>
+</html>
+  `);
+  w.document.close();
+  w.focus();
+}
+
+function ensureChartDownloadButtons() {
+  const canvas = document.getElementById("metricChart");
+  if (!canvas) return;
+
+  // Only insert once
+  if (document.getElementById("chartDownloadButtons")) return;
+
+  const wrap = document.createElement("div");
+  wrap.id = "chartDownloadButtons";
+  wrap.style.display = "inline-flex";
+  wrap.style.gap = "8px";
+  wrap.style.marginLeft = "12px";
+  wrap.style.alignItems = "center";
+  wrap.style.flexWrap = "wrap";
+
+  const mkBtn = (id, text, onClick) => {
+    const b = document.createElement("button");
+    b.id = id;
+    b.type = "button";
+    b.textContent = text;
+    b.style.padding = "6px 10px";
+    b.style.border = "1px solid #d0d0d0";
+    b.style.borderRadius = "8px";
+    b.style.background = "#fff";
+    b.style.cursor = "pointer";
+    b.addEventListener("click", onClick);
+    return b;
+  };
+
+  wrap.appendChild(mkBtn("downloadChartPng", "Download PNG", () => downloadChartAs("image/png")));
+  wrap.appendChild(mkBtn("downloadChartJpg", "Download JPG", () => downloadChartAs("image/jpeg")));
+  wrap.appendChild(mkBtn("downloadChartPdf", "PDF (Print)", downloadChartPdfViaPrint));
+
+  // Try to place next to metric select if available
+  const metricSelect = document.getElementById("chartMetricSelect");
+  if (metricSelect && metricSelect.parentElement) {
+    metricSelect.parentElement.appendChild(wrap);
+    return;
+  }
+
+  // Otherwise, place above canvas
+  const parent = canvas.parentElement;
+  if (parent) parent.insertBefore(wrap, canvas);
 }
 
 // -------------------------
@@ -822,6 +967,8 @@ function renderChart() {
   const modeLabel = document.getElementById("chartModeLabel");
   if (!canvas || !sel || typeof Chart === "undefined") return;
 
+  ensureChartDownloadButtons();
+
   if (sel.options.length === 0) ensureChartMetricOptions(true);
 
   const metricKey = sel.value;
@@ -933,8 +1080,9 @@ function refresh() {
   const visibleMonths = state.visibleMonths.length ? state.visibleMonths : [state.latestMonthKey];
   const selected = uniqueCompanies(state.rows).filter(c => state.selectedCompanies.has(c));
 
-  document.getElementById("lastUpdated").textContent =
+  const viewingText =
     `Loaded from Xano. Latest month in Xano: ${state.latestMonthKey}. Viewing: ${visibleMonths.join(", ")}.`;
+  setViewingAndLastUpdatedText(viewingText);
 
   if (!selected.length) {
     mount.appendChild(el("p", { className: "muted", text: "No companies selected." }));
@@ -957,6 +1105,8 @@ async function reloadFromXanoAndRefresh() {
   const { min, max } = computeMinMaxMonthKey(state.rows);
   state.minMonthKey = min;
   state.maxMonthKey = max;
+
+  state.lastLoadedAtUtc = new Date(); // timestamp of when the UI loaded/refreshed
 
   const companies = uniqueCompanies(state.rows);
   if (state.selectedCompanies.size === 0) companies.forEach(c => state.selectedCompanies.add(c));
@@ -986,7 +1136,8 @@ function setLockedUI(locked) {
   } else {
     lockScreen.classList.add("hidden");
     appRoot.classList.remove("hidden");
-    lockBtn.classList.remove("hidden");
+    lockBtn.classList.add("hidden"); // keep original behavior if you intended it
+    lockBtn.classList.remove("hidden"); // show lock button when unlocked
   }
 }
 
@@ -1083,45 +1234,60 @@ async function init() {
   const chartSelect = document.getElementById("chartMetricSelect");
   if (chartSelect) chartSelect.addEventListener("change", renderChart);
 
-  document.getElementById("pagePassword").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      document.getElementById("unlockBtn").click();
-    }
-  });
-
-  document.getElementById("applyRange").addEventListener("click", applyCustomRangeFromSelectors);
-  document.getElementById("quickThisMonth").addEventListener("change", (e) => { if (e.target.checked) setQuickThisMonth(); });
-  document.getElementById("quickLastMonth").addEventListener("change", (e) => { if (e.target.checked) setQuickLastMonth(); });
-
-  document.getElementById("lockBtn").addEventListener("click", () => {
-    clearEditKey();
-    setLockedUI(true);
-  });
-
-  document.getElementById("unlockBtn").addEventListener("click", async () => {
-    const pw = document.getElementById("pagePassword").value;
-    const errMount = document.getElementById("lockError");
-    errMount.textContent = "";
-
-    try {
-      await attemptUnlock(pw);
-      setLockedUI(false);
-
-      if (state.minMonthKey && state.maxMonthKey) {
-        const minY = Number(state.minMonthKey.split("-")[0]);
-        const maxY = Number(state.maxMonthKey.split("-")[0]);
-        fillYearSelect(document.getElementById("startYear"), minY, maxY);
-        fillYearSelect(document.getElementById("endYear"), minY, maxY);
-        fillMonthSelect(document.getElementById("startMonth"));
-        fillMonthSelect(document.getElementById("endMonth"));
-        setRangeSelectorsFromKeys(state.rangeStartKey, state.rangeEndKey);
+  // Enter = Unlock
+  const pw = document.getElementById("pagePassword");
+  if (pw) {
+    pw.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        document.getElementById("unlockBtn").click();
       }
-    } catch (err) {
+    });
+  }
+
+  const applyRangeBtn = document.getElementById("applyRange");
+  if (applyRangeBtn) applyRangeBtn.addEventListener("click", applyCustomRangeFromSelectors);
+
+  const thisMonth = document.getElementById("quickThisMonth");
+  if (thisMonth) thisMonth.addEventListener("change", (e) => { if (e.target.checked) setQuickThisMonth(); });
+
+  const lastMonth = document.getElementById("quickLastMonth");
+  if (lastMonth) lastMonth.addEventListener("change", (e) => { if (e.target.checked) setQuickLastMonth(); });
+
+  const lockBtn = document.getElementById("lockBtn");
+  if (lockBtn) {
+    lockBtn.addEventListener("click", () => {
       clearEditKey();
-      errMount.textContent = `Unlock failed: ${String(err?.message || err)}`;
-    }
-  });
+      setLockedUI(true);
+    });
+  }
+
+  const unlockBtn = document.getElementById("unlockBtn");
+  if (unlockBtn) {
+    unlockBtn.addEventListener("click", async () => {
+      const pwVal = document.getElementById("pagePassword").value;
+      const errMount = document.getElementById("lockError");
+      if (errMount) errMount.textContent = "";
+
+      try {
+        await attemptUnlock(pwVal);
+        setLockedUI(false);
+
+        if (state.minMonthKey && state.maxMonthKey) {
+          const minY = Number(state.minMonthKey.split("-")[0]);
+          const maxY = Number(state.maxMonthKey.split("-")[0]);
+          fillYearSelect(document.getElementById("startYear"), minY, maxY);
+          fillYearSelect(document.getElementById("endYear"), minY, maxY);
+          fillMonthSelect(document.getElementById("startMonth"));
+          fillMonthSelect(document.getElementById("endMonth"));
+          setRangeSelectorsFromKeys(state.rangeStartKey, state.rangeEndKey);
+        }
+      } catch (err) {
+        clearEditKey();
+        if (errMount) errMount.textContent = `Unlock failed: ${String(err?.message || err)}`;
+      }
+    });
+  }
 
   setLockedUI(true);
 }
