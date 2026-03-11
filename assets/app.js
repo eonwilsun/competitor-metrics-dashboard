@@ -2,7 +2,9 @@
 // Xano config
 // -------------------------
 const XANO_BASE_URL = "https://x8ki-letl-twmt.n7.xano.io/api:ZvixoXZ8";
-const XANO_TABLE_PATH = "/competitor_metrics_dashboard"; // from your screenshot
+const XANO_TABLE_PATH = "/competitor_metrics_dashboard"; // metrics table endpoint
+const XANO_CONFIG_PATH = "/app_config";                 // app_config endpoint (must exist in Xano API)
+const EDIT_KEY_NAME = "EDIT_KEY";                       // key column value in app_config table
 const SESSION_KEY = "cmd.editKey.v1";
 
 // Which fields to show/edit (must match your Xano column names)
@@ -90,10 +92,14 @@ function clearEditKey() {
   sessionStorage.removeItem(SESSION_KEY);
 }
 
-async function xanoFetch(path, { method = "GET", body = null } = {}) {
+async function xanoFetch(path, { method = "GET", body = null, withEditKey = true } = {}) {
   const headers = { "Content-Type": "application/json" };
-  const key = getEditKey();
-  if (key) headers["x-edit-key"] = key;
+
+  // Only attach x-edit-key if requested
+  if (withEditKey) {
+    const key = getEditKey();
+    if (key) headers["x-edit-key"] = key;
+  }
 
   const res = await fetch(`${XANO_BASE_URL}${path}`, {
     method,
@@ -107,6 +113,24 @@ async function xanoFetch(path, { method = "GET", body = null } = {}) {
   }
 
   return await res.json();
+}
+
+// -------------------------
+// Password verification (uses app_config EDIT_KEY)
+// -------------------------
+async function fetchEditKeyFromXano() {
+  // IMPORTANT: app_config endpoint must be publicly readable for this to work.
+  // If it is not readable, you need a dedicated "verify password" endpoint in Xano.
+  const res = await xanoFetch(XANO_CONFIG_PATH, { method: "GET", withEditKey: false });
+  const rows = Array.isArray(res) ? res : (res?.items || res?.data || []);
+
+  const row = rows.find(r => String(r.key || "").trim() === EDIT_KEY_NAME);
+  return row?.value ? String(row.value) : "";
+}
+
+async function verifyPassword(pw) {
+  const actual = await fetchEditKeyFromXano();
+  return actual && String(pw) === actual;
 }
 
 // -------------------------
@@ -153,7 +177,7 @@ function getRangeMonths(latestMonth, range) {
 const state = {
   timeRange: "thisMonth",
   selectedCompanies: new Set(),
-  rows: [],              // raw Xano rows (normalized after load)
+  rows: [],              // normalized rows
   latestMonthKey: null   // YYYY-MM
 };
 
@@ -194,8 +218,6 @@ function renderCompanyToggles(companies) {
 }
 
 function renderDatasetToggles() {
-  // You currently have one dataset table in Xano (flat fields),
-  // so we'll show a simple "All metrics" toggle group for now.
   const mount = document.getElementById("datasetToggle");
   mount.innerHTML = "";
 
@@ -235,10 +257,7 @@ function normalizeRow(row) {
   // --- Monthly Instagram posts object -> numeric field
   const postsObj = r.number_of_monthly_instagram_posts;
   if (postsObj && typeof postsObj === "object") {
-    const total =
-      toNumberOrNull(postsObj.total) ??
-      toNumberOrNull(postsObj.total_posts);
-
+    const total = toNumberOrNull(postsObj.total) ?? toNumberOrNull(postsObj.total_posts);
     if (total !== null) {
       r.number_of_monthly_instagram_posts = total;
     } else {
@@ -252,10 +271,7 @@ function normalizeRow(row) {
   // --- Monthly Instagram engagement object -> numeric field
   const engObj = r.monthly_instagram_engagement;
   if (engObj && typeof engObj === "object") {
-    const total =
-      toNumberOrNull(engObj.total_engagement) ??
-      toNumberOrNull(engObj.total);
-
+    const total = toNumberOrNull(engObj.total_engagement) ?? toNumberOrNull(engObj.total);
     if (total !== null) {
       r.monthly_instagram_engagement = total;
     } else {
@@ -326,7 +342,7 @@ function wireEditMetricModal() {
     }
 
     const { row, fieldKey } = editModalState;
-    const id = row.id; // Xano record id field is "id"
+    const id = row.id;
     if (!id) {
       alert("Missing record id.");
       return;
@@ -334,7 +350,8 @@ function wireEditMetricModal() {
 
     await xanoFetch(`${XANO_TABLE_PATH}/${id}`, {
       method: "PATCH",
-      body: { [fieldKey]: num }
+      body: { [fieldKey]: num },
+      withEditKey: true
     });
 
     closeEditMetricModal();
@@ -353,7 +370,7 @@ function buildMetricsTable(visibleMonths, companies) {
   trh.appendChild(el("th", { text: "Company" }));
   trh.appendChild(el("th", { text: "Month(s)" }));
 
-  for (const f of METRIC_FIELDS) trh.appendChild(el("th", { text: f.label }));
+  for (const f of METRIC_FIELDS) trh.appendChild(el("th", { text: f.label })); // includes agency fee cols
   trh.appendChild(el("th", { text: "Notes" }));
 
   thead.appendChild(trh);
@@ -411,7 +428,7 @@ function buildMetricsTable(visibleMonths, companies) {
       tr.appendChild(td);
     }
 
-    // Notes cell (edits PATCH notes)
+    // Notes cell
     const notesTd = el("td");
     const notesWrap = el("div", { style: "display:flex; gap:8px; align-items:flex-start;" });
 
@@ -442,7 +459,8 @@ function buildMetricsTable(visibleMonths, companies) {
       }
       await xanoFetch(`${XANO_TABLE_PATH}/${r.id}`, {
         method: "PATCH",
-        body: { [NOTES_FIELD_KEY]: notesArea.value }
+        body: { [NOTES_FIELD_KEY]: notesArea.value },
+        withEditKey: true
       });
       saveBtn.textContent = "Saved";
       saveBtn.disabled = true;
@@ -559,7 +577,7 @@ function downloadBlob(filename, mime, content) {
 // Lock screen / init
 // -------------------------
 async function reloadFromXanoAndRefresh() {
-  const rows = await xanoFetch(XANO_TABLE_PATH, { method: "GET" });
+  const rows = await xanoFetch(XANO_TABLE_PATH, { method: "GET", withEditKey: false });
   const raw = Array.isArray(rows) ? rows : (rows?.items || rows?.data || []);
 
   // Normalize to prevent object values rendering as NaN
@@ -599,7 +617,15 @@ function setLockedUI(locked) {
 }
 
 async function attemptUnlock(password) {
+  const ok = await verifyPassword(password);
+  if (!ok) {
+    throw new Error("Incorrect password.");
+  }
+
+  // Store the password for PATCH edits
   setEditKey(password);
+
+  // Load data
   await reloadFromXanoAndRefresh();
 }
 
@@ -646,11 +672,11 @@ async function init() {
       setLockedUI(false);
     } catch (err) {
       clearEditKey();
-      // Step 2 fix: show the real error on screen
       errMount.textContent = `Unlock failed: ${String(err?.message || err)}`;
     }
   });
 
+  // Auto-unlock if key exists in session
   const existing = getEditKey();
   if (existing) {
     try {
@@ -665,7 +691,17 @@ async function init() {
   }
 }
 
-init().catch((err) => {
+function showFatal(err) {
+  const msg = String(err?.stack || err);
+  console.error(err);
+
+  const lockErr = document.getElementById("lockError");
+  if (lockErr) lockErr.textContent = msg;
+
   const mount = document.getElementById("metricsDisplay");
-  if (mount) mount.appendChild(el("pre", { text: String(err?.stack || err) }));
+  if (mount) mount.appendChild(el("pre", { text: msg }));
+}
+
+window.addEventListener("DOMContentLoaded", () => {
+  init().catch(showFatal);
 });
