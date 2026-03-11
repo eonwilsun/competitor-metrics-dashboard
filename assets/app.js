@@ -7,7 +7,9 @@ const XANO_CONFIG_PATH = "/app_config";
 const EDIT_KEY_NAME = "EDIT_KEY";
 const SESSION_KEY = "cmd.editKey.v1";
 
-// Which fields to show/edit
+// -------------------------
+// Metrics
+// -------------------------
 const METRIC_FIELDS = [
   { key: "domain_authority", label: "Authority Score", format: "int" },
   { key: "number_of_referring_domains", label: "Referring Domains", format: "int" },
@@ -15,7 +17,7 @@ const METRIC_FIELDS = [
   { key: "organic_traffic", label: "Organic Traffic (est.)", format: "int" },
   { key: "instagram_followers", label: "Followers", format: "int" },
 
-  // Display-only formatted strings derived from objects (single-month display only)
+  // Display-only derived strings (single-month display)
   { key: "number_of_monthly_instagram_posts_display", label: "Posts / month", format: "richtext" },
   { key: "monthly_instagram_engagement_display", label: "Engagements / month", format: "richtext" },
 
@@ -25,14 +27,28 @@ const METRIC_FIELDS = [
 
   { key: "meta_ads_running", label: "Meta Ads Running", format: "int" },
 
-  // Editable richtext (multi-line + clickable links) (single-month edit only)
+  // Editable richtext (multi-line + clickable links)
   { key: "monthly_press_coverage", label: "Monthly Press Coverage", format: "richtext", editable: true }
 ];
 
 const NOTES_FIELD_KEY = "notes";
 
+// For charting
+const CHART_METRICS = [
+  { key: "domain_authority", label: "Authority Score" },
+  { key: "number_of_referring_domains", label: "Referring Domains" },
+  { key: "number_of_organic_keywords", label: "Organic Keywords" },
+  { key: "organic_traffic", label: "Organic Traffic (est.)" },
+  { key: "instagram_followers", label: "Followers" },
+  { key: "agency_fee_one_child_weekly", label: "Agency Fee / week" },
+  { key: "agency_fee_one_child_yearly", label: "Agency Fee / year" },
+  { key: "meta_ads_running", label: "Meta Ads Running" },
+  { key: "number_of_monthly_instagram_posts", label: "Posts / month (Total)" },
+  { key: "monthly_instagram_engagement", label: "Engagements / month (Total)" }
+];
+
 // -------------------------
-// Utilities
+// DOM helpers
 // -------------------------
 function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
@@ -46,6 +62,9 @@ function el(tag, attrs = {}, children = []) {
   return node;
 }
 
+// -------------------------
+// Formatting + parsing
+// -------------------------
 function toNumberOrNull(v) {
   if (v === null || v === undefined || v === "") return null;
   const n = Number(v);
@@ -66,19 +85,14 @@ function formatPercent(v) {
 
 function formatValue(v, format) {
   if (v === null || v === undefined || v === "") return "—";
-
   if (format === "int") {
     const n = Number(v);
     if (Number.isNaN(n)) return "—";
     return n.toLocaleString();
   }
-
-  if (format === "richtext") return String(v);
-
   return String(v);
 }
 
-// safe richtext rendering
 function escapeHtml(s) {
   return String(s)
     .replaceAll("&", "&amp;")
@@ -98,18 +112,63 @@ function linkifyTextToHtml(text) {
   return withLinks.replaceAll("\n", "<br>");
 }
 
-// Instagram formatting
+// -------------------------
+// Company ordering (Swiis first always)
+// -------------------------
+function companySort(a, b) {
+  const aa = String(a || "").trim();
+  const bb = String(b || "").trim();
+  const aIsSwiis = aa.toLowerCase() === "swiis";
+  const bIsSwiis = bb.toLowerCase() === "swiis";
+  if (aIsSwiis && !bIsSwiis) return -1;
+  if (!aIsSwiis && bIsSwiis) return 1;
+  return aa.localeCompare(bb);
+}
+
+// -------------------------
+// Instagram breakdown + totals
+// -------------------------
+function pickNumberFromObject(obj, keys) {
+  for (const k of keys) {
+    if (Object.prototype.hasOwnProperty.call(obj, k)) {
+      const n = toNumberOrNull(obj[k]);
+      if (n !== null) return n;
+    }
+  }
+  return null;
+}
+
 function formatPostsBreakdown(obj) {
   if (!obj || typeof obj !== "object") return null;
 
-  const images = toNumberOrNull(obj.Images ?? obj.images ?? obj.Image ?? obj.image);
-  const reels = toNumberOrNull(obj.Reels ?? obj.reels ?? obj.reels_video ?? obj.reel);
-  const total = toNumberOrNull(obj.Total ?? obj.total ?? obj.number_of_monthly_instagram_posts_total ?? obj.total_posts);
+  // Accept a wide range of possible key names coming from Xano
+  const images = pickNumberFromObject(obj, [
+    "Images", "images", "Image", "image", "image_total", "images_total", "image_posts", "images_posts"
+  ]);
+
+  const reels = pickNumberFromObject(obj, [
+    "Reels", "reels", "reels_video", "reel", "reelsVideo"
+  ]);
+
+  // You asked for "video" and "quantity" to show too.
+  // Common possibilities: "video", "videos", "Video", plus "quantity", "Quantity"
+  const video = pickNumberFromObject(obj, [
+    "Video", "video", "Videos", "videos", "video_posts", "videos_posts"
+  ]);
+
+  const quantity = pickNumberFromObject(obj, [
+    "Quantity", "quantity", "qty", "Qty"
+  ]);
+
+  const total = pickNumberFromObject(obj, [
+    "Total", "total", "number_of_monthly_instagram_posts_total", "total_posts"
+  ]);
 
   const parts = [];
-  // show Images even if it is 0 (but not if missing)
   if (images !== null) parts.push(`Images: ${images.toLocaleString()}`);
+  if (video !== null) parts.push(`Video: ${video.toLocaleString()}`);
   if (reels !== null) parts.push(`Reels: ${reels.toLocaleString()}`);
+  if (quantity !== null) parts.push(`Quantity: ${quantity.toLocaleString()}`);
   if (total !== null) parts.push(`Total: ${total.toLocaleString()}`);
 
   return parts.length ? parts.join(", ") : null;
@@ -127,21 +186,25 @@ function formatEngagementBreakdown(obj) {
   const parts = [];
   if (rateStr) parts.push(`${rateStr} engagement rate`);
   if (totalNum !== null) parts.push(`total: ${totalNum.toLocaleString()}`);
-
   return parts.length ? parts.join(", ") : null;
 }
 
 function extractPostsTotal(obj) {
   if (!obj || typeof obj !== "object") return toNumberOrNull(obj);
-  return toNumberOrNull(obj.Total ?? obj.total ?? obj.number_of_monthly_instagram_posts_total ?? obj.total_posts);
+  return pickNumberFromObject(obj, [
+    "Total", "total", "number_of_monthly_instagram_posts_total", "total_posts"
+  ]);
 }
 
 function extractEngagementTotal(obj) {
   if (!obj || typeof obj !== "object") return toNumberOrNull(obj);
-  return toNumberOrNull(obj.Total ?? obj.total ?? obj.total_engagement ?? obj.totalEngagement);
+  const n = toNumberOrNull(obj.Total ?? obj.total ?? obj.total_engagement ?? obj.totalEngagement);
+  return n;
 }
 
+// -------------------------
 // Month helpers
+// -------------------------
 const MONTHS = {
   january: "01", february: "02", march: "03", april: "04",
   may: "05", june: "06", july: "07", august: "08",
@@ -187,7 +250,6 @@ function listMonthKeysBetween(startKey, endKey) {
   }
   return out;
 }
-
 function currentMonthKeyUTC() {
   const now = new Date();
   return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
@@ -200,12 +262,13 @@ function previousMonthKeyUTC(monthKey) {
   return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-// Session
+// -------------------------
+// Session + Xano
+// -------------------------
 function getEditKey() { return sessionStorage.getItem(SESSION_KEY) || ""; }
 function setEditKey(k) { sessionStorage.setItem(SESSION_KEY, k); }
 function clearEditKey() { sessionStorage.removeItem(SESSION_KEY); }
 
-// Xano
 async function xanoFetch(path, { method = "GET", body = null, withEditKey = true } = {}) {
   const headers = { "Content-Type": "application/json" };
   if (withEditKey) {
@@ -226,7 +289,6 @@ async function xanoFetch(path, { method = "GET", body = null, withEditKey = true
   return await res.json();
 }
 
-// Password verification
 async function fetchEditKeyFromXano() {
   const res = await xanoFetch(XANO_CONFIG_PATH, { method: "GET", withEditKey: false });
   const rows = Array.isArray(res) ? res : (res?.items || res?.data || []);
@@ -259,7 +321,6 @@ const state = {
   latestMonthKey: null
 };
 
-// Month bounds
 function computeLatestMonthKey(rows) {
   const keys = rows.map(r => monthKeyFromYearMonthName(r.year, r.month)).filter(Boolean).sort();
   return keys[keys.length - 1] || null;
@@ -269,10 +330,9 @@ function computeMinMaxMonthKey(rows) {
   return { min: keys[0] || null, max: keys[keys.length - 1] || null };
 }
 
-// Companies + row lookup
 function uniqueCompanies(rows) {
   const set = new Set(rows.map(r => String(r.company || "").trim()).filter(Boolean));
-  return Array.from(set).sort((a, b) => a.localeCompare(b));
+  return Array.from(set).sort(companySort);
 }
 
 function renderCompanyToggles(companies) {
@@ -306,7 +366,6 @@ function findRowByCompanyAndMonth(companyName, monthKey) {
   return state.rows.find(r => String(r.company) === String(companyName) && monthKeyFromYearMonthName(r.year, r.month) === monthKey);
 }
 
-// Normalize rows
 function normalizeRow(row) {
   const r = { ...row };
 
@@ -317,10 +376,8 @@ function normalizeRow(row) {
     r.agency_fee_one_child_yearly = toNumberOrNull(feeObj.Yearly ?? feeObj.yearly);
   }
 
-  // Press coverage text
   r.monthly_press_coverage = normalizeText(r.monthly_press_coverage);
 
-  // Instagram display strings
   r.number_of_monthly_instagram_posts_display =
     formatPostsBreakdown(r.number_of_monthly_instagram_posts) ??
     (toNumberOrNull(r.number_of_monthly_instagram_posts) !== null ? Number(r.number_of_monthly_instagram_posts).toLocaleString() : null);
@@ -333,7 +390,7 @@ function normalizeRow(row) {
 }
 
 // -------------------------
-// Edit modals (number + text)
+// Modals (unchanged from your current working version)
 // -------------------------
 let editModalState = null;
 let editTextModalState = null;
@@ -422,7 +479,7 @@ function wireEditModals() {
     const { row, fieldKey } = editTextModalState;
     if (!row?.id) return alert("Missing record id.");
 
-    const payloadVal = (val === "" ? null : val); // keep newlines exactly; blank clears
+    const payloadVal = (val === "" ? null : val);
 
     await xanoFetch(`${XANO_TABLE_PATH}/${row.id}`, {
       method: "PATCH",
@@ -434,7 +491,6 @@ function wireEditModals() {
     await reloadFromXanoAndRefresh();
   });
 
-  // Esc closes whichever is open
   window.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
     if (editModalState) closeEditMetricModal();
@@ -443,7 +499,7 @@ function wireEditModals() {
 }
 
 // -------------------------
-// Multi-month numeric averaging
+// Multi-month averaging
 // -------------------------
 function averageNumericForCompanyAcrossMonths(companyName, monthKeys, fieldKey) {
   const vals = monthKeys
@@ -494,11 +550,8 @@ function buildMetricsTable(visibleMonths, companies) {
         editTargetRow = findRowByCompanyAndMonth(companyName, editMonthKey);
         displayValue = editTargetRow ? editTargetRow[f.key] : null;
       } else {
-        if (f.format === "int") {
-          displayValue = averageNumericForCompanyAcrossMonths(companyName, visibleMonths, f.key);
-        } else {
-          displayValue = null;
-        }
+        if (f.format === "int") displayValue = averageNumericForCompanyAcrossMonths(companyName, visibleMonths, f.key);
+        else displayValue = null;
       }
 
       const td = el("td");
@@ -602,13 +655,12 @@ function buildMetricsTable(visibleMonths, companies) {
 }
 
 // -------------------------
-// Chart.js integration (FIXED so you can pick a metric)
-// Requires Chart.js in index.html
+// Chart.js
 // -------------------------
 let metricChart = null;
 
 function companyColor(company) {
-  if (String(company).toLowerCase() === "swiis") return "#f59e0b"; // orange for Swiis
+  if (String(company).toLowerCase() === "swiis") return "#f59e0b"; // orange
   let hash = 0;
   const s = String(company);
   for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
@@ -616,46 +668,28 @@ function companyColor(company) {
   return `hsl(${hue}, 70%, 45%)`;
 }
 
-function chartableMetrics() {
-  return [
-    { key: "domain_authority", label: "Authority Score" },
-    { key: "number_of_referring_domains", label: "Referring Domains" },
-    { key: "number_of_organic_keywords", label: "Organic Keywords" },
-    { key: "organic_traffic", label: "Organic Traffic (est.)" },
-    { key: "instagram_followers", label: "Followers" },
-    { key: "agency_fee_one_child_weekly", label: "Agency Fee / week" },
-    { key: "agency_fee_one_child_yearly", label: "Agency Fee / year" },
-    { key: "meta_ads_running", label: "Meta Ads Running" },
-    { key: "number_of_monthly_instagram_posts", label: "Posts / month (Total)" },
-    { key: "monthly_instagram_engagement", label: "Engagements / month (Total)" }
-  ];
-}
-
 function getNumericMetricValue(row, metricKey) {
   if (!row) return null;
-
   if (metricKey === "number_of_monthly_instagram_posts") return extractPostsTotal(row.number_of_monthly_instagram_posts);
   if (metricKey === "monthly_instagram_engagement") return extractEngagementTotal(row.monthly_instagram_engagement);
-
   return toNumberOrNull(row[metricKey]);
 }
 
-function ensureChartMetricOptions() {
+function ensureChartMetricOptions(force = false) {
   const sel = document.getElementById("chartMetricSelect");
   if (!sel) return;
 
-  const opts = chartableMetrics();
-
-  // If options already exist, don't wipe selection on every refresh
-  if (sel.options.length === 0) {
-    for (const o of opts) {
+  if (force || sel.options.length === 0) {
+    const prev = sel.value;
+    sel.innerHTML = "";
+    for (const m of CHART_METRICS) {
       const opt = document.createElement("option");
-      opt.value = o.key;
-      opt.textContent = o.label;
+      opt.value = m.key;
+      opt.textContent = m.label;
       sel.appendChild(opt);
     }
-    // default selection
-    if (opts.length) sel.value = opts[0].key;
+    const want = prev && CHART_METRICS.some(x => x.key === prev) ? prev : (CHART_METRICS[0]?.key || "");
+    if (want) sel.value = want;
   }
 }
 
@@ -672,10 +706,12 @@ function renderChart() {
   const modeLabel = document.getElementById("chartModeLabel");
   if (!canvas || !sel || typeof Chart === "undefined") return;
 
+  if (sel.options.length === 0) ensureChartMetricOptions(true);
+
   const metricKey = sel.value;
   if (!metricKey) return;
 
-  const metricLabel = chartableMetrics().find(m => m.key === metricKey)?.label || metricKey;
+  const metricLabel = CHART_METRICS.find(m => m.key === metricKey)?.label || metricKey;
 
   const visibleMonths = state.visibleMonths.length ? state.visibleMonths : (state.latestMonthKey ? [state.latestMonthKey] : []);
   if (!visibleMonths.length) return;
@@ -753,7 +789,8 @@ function refresh() {
   }
 
   const visibleMonths = state.visibleMonths.length ? state.visibleMonths : [state.latestMonthKey];
-  const allCompanies = uniqueCompanies(state.rows);
+
+  const allCompanies = uniqueCompanies(state.rows); // already Swiis-first
   const selected = allCompanies.filter(c => state.selectedCompanies.has(c));
 
   document.getElementById("lastUpdated").textContent =
@@ -767,8 +804,7 @@ function refresh() {
 
   mount.appendChild(buildMetricsTable(visibleMonths, selected));
 
-  // Chart: make sure dropdown has options and render
-  ensureChartMetricOptions();
+  ensureChartMetricOptions(false);
   renderChart();
 }
 
@@ -782,7 +818,7 @@ async function reloadFromXanoAndRefresh() {
   state.minMonthKey = min;
   state.maxMonthKey = max;
 
-  const companies = uniqueCompanies(state.rows);
+  const companies = uniqueCompanies(state.rows); // Swiis-first
   if (state.selectedCompanies.size === 0) companies.forEach(c => state.selectedCompanies.add(c));
   else for (const c of Array.from(state.selectedCompanies)) if (!companies.includes(c)) state.selectedCompanies.delete(c);
 
@@ -802,6 +838,7 @@ async function reloadFromXanoAndRefresh() {
     state.rangeEndKey = defaultKey;
   }
 
+  ensureChartMetricOptions(true);
   refresh();
 }
 
@@ -827,7 +864,7 @@ async function attemptUnlock(password) {
   await reloadFromXanoAndRefresh();
 }
 
-// Time-range UI wiring
+// Time-range UI
 function fillMonthSelect(selectEl) {
   selectEl.innerHTML = "";
   for (const m of MONTH_LABELS) {
@@ -891,14 +928,11 @@ function setQuickLastMonth() {
 
 async function init() {
   wireEditModals();
+  ensureChartMetricOptions(true);
 
-  // Chart dropdown must be interactive: render on change
+  // Chart rerender on metric selection
   const chartSelect = document.getElementById("chartMetricSelect");
-  if (chartSelect) {
-    chartSelect.addEventListener("change", () => {
-      renderChart();
-    });
-  }
+  if (chartSelect) chartSelect.addEventListener("change", renderChart);
 
   // Enter key = Unlock
   document.getElementById("pagePassword").addEventListener("keydown", (e) => {
