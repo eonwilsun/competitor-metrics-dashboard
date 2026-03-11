@@ -17,9 +17,11 @@ const METRIC_FIELDS = [
   { key: "organic_traffic", label: "Organic Traffic (est.)", format: "int" },
   { key: "instagram_followers", label: "Followers", format: "int" },
 
+  // NOTE: These are display fields, but we now PATCH their underlying object totals
   { key: "number_of_monthly_instagram_posts_display", label: "Posts / month", format: "richtext" },
   { key: "monthly_instagram_engagement_display", label: "Engagements / month", format: "richtext" },
 
+  // NOTE: These are derived from agency_fee_one_child object, but we now PATCH the object keys
   { key: "agency_fee_one_child_weekly", label: "Agency Fee (1 child) / week", format: "int" },
   { key: "agency_fee_one_child_yearly", label: "Agency Fee (1 child) / year", format: "int" },
 
@@ -410,6 +412,42 @@ function getRowId(row) {
 }
 
 // -------------------------
+// PATCH helpers for nested object-backed fields
+// -------------------------
+
+// Map "UI field keys" -> which object + subkey should be updated in Xano.
+// These are the fields that currently "don't update" because they are objects in Xano.
+const PATCH_PATHS_BY_FIELD_KEY = {
+  // Agency fee fields are derived from agency_fee_one_child object
+  agency_fee_one_child_weekly: { root: "agency_fee_one_child", child: "Weekly" },
+  agency_fee_one_child_yearly: { root: "agency_fee_one_child", child: "Yearly" },
+
+  // Display fields: patch the underlying object totals (not the display string)
+  number_of_monthly_instagram_posts_display: {
+    root: "number_of_monthly_instagram_posts",
+    child: "number_of_monthly_instagram_posts_total"
+  },
+  monthly_instagram_engagement_display: { root: "monthly_instagram_engagement", child: "total_engagement" }
+};
+
+function buildPatchBodyForMetric(row, fieldKey, num) {
+  const map = PATCH_PATHS_BY_FIELD_KEY[fieldKey];
+  if (!map) return { [fieldKey]: num };
+
+  const currentRoot =
+    row && row[map.root] && typeof row[map.root] === "object"
+      ? row[map.root]
+      : {};
+
+  return {
+    [map.root]: {
+      ...currentRoot,
+      [map.child]: num
+    }
+  };
+}
+
+// -------------------------
 // Modals
 // -------------------------
 let editModalState = null;
@@ -529,9 +567,11 @@ function wireEditModals() {
       btn.disabled = true;
       btn.textContent = "Saving...";
 
+      const body = buildPatchBodyForMetric(row, fieldKey, num);
+
       await xanoFetch(`${XANO_TABLE_PATH}/${rowId}`, {
         method: "PATCH",
-        body: { [fieldKey]: num },
+        body,
         withEditKey: true
       });
 
@@ -669,6 +709,7 @@ function buildMetricsTable(visibleMonths, companies) {
           title: singleMonth ? "Click to edit" : "Shown only in single-month view"
         });
 
+        // Only monthly_press_coverage is editable richtext.
         if (singleMonth && editTargetRow && f.editable) {
           div.addEventListener("click", (e) => {
             if (e.target && e.target.closest && e.target.closest("a")) return;
