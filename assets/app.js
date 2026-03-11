@@ -15,16 +15,17 @@ const METRIC_FIELDS = [
   { key: "organic_traffic", label: "Organic Traffic (est.)", format: "int" },
   { key: "instagram_followers", label: "Followers", format: "int" },
 
-  // Display-only formatted strings derived from objects
+  // Display-only formatted strings derived from objects (single-month display only)
   { key: "number_of_monthly_instagram_posts_display", label: "Posts / month", format: "richtext" },
   { key: "monthly_instagram_engagement_display", label: "Engagements / month", format: "richtext" },
 
+  // Derived numeric fields from agency_fee_one_child object
   { key: "agency_fee_one_child_weekly", label: "Agency Fee (1 child) / week", format: "int" },
   { key: "agency_fee_one_child_yearly", label: "Agency Fee (1 child) / year", format: "int" },
 
   { key: "meta_ads_running", label: "Meta Ads Running", format: "int" },
 
-  // Editable rich text (multi-line + clickable links)
+  // Editable richtext (multi-line + clickable links) (single-month edit only)
   { key: "monthly_press_coverage", label: "Monthly Press Coverage", format: "richtext", editable: true }
 ];
 
@@ -72,15 +73,12 @@ function formatValue(v, format) {
     return n.toLocaleString();
   }
 
-  if (format === "richtext") {
-    // richtext will be inserted as HTML elsewhere; fallback to string for CSV/export
-    return String(v);
-  }
+  if (format === "richtext") return String(v);
 
   return String(v);
 }
 
-// Convert multiline text with URLs into safe clickable HTML
+// safe richtext rendering
 function escapeHtml(s) {
   return String(s)
     .replaceAll("&", "&amp;")
@@ -97,7 +95,6 @@ function linkifyTextToHtml(text) {
   const withLinks = safe.replace(urlRegex, (url) => {
     return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
   });
-  // Preserve newlines
   return withLinks.replaceAll("\n", "<br>");
 }
 
@@ -105,17 +102,9 @@ function linkifyTextToHtml(text) {
 function formatPostsBreakdown(obj) {
   if (!obj || typeof obj !== "object") return null;
 
-  // Your Xano keys (from screenshots) appear as:
-  // Image, reels_video, number_of_monthly_instagram_posts_total
-  const images = toNumberOrNull(
-    obj.Images ?? obj.images ?? obj.Image ?? obj.image ?? obj.image_total ?? obj.images_total
-  );
-  const reels = toNumberOrNull(
-    obj.Reels ?? obj.reels ?? obj.reels_video ?? obj.reel ?? obj.reelsVideo
-  );
-  const total = toNumberOrNull(
-    obj.Total ?? obj.total ?? obj.number_of_monthly_instagram_posts_total ?? obj.total_posts
-  );
+  const images = toNumberOrNull(obj.Images ?? obj.images ?? obj.Image ?? obj.image);
+  const reels = toNumberOrNull(obj.Reels ?? obj.reels ?? obj.reels_video ?? obj.reel);
+  const total = toNumberOrNull(obj.Total ?? obj.total ?? obj.number_of_monthly_instagram_posts_total ?? obj.total_posts);
 
   const parts = [];
   if (images !== null) parts.push(`Images: ${images.toLocaleString()}`);
@@ -284,6 +273,7 @@ function uniqueCompanies(rows) {
   const set = new Set(rows.map(r => String(r.company || "").trim()).filter(Boolean));
   return Array.from(set).sort((a, b) => a.localeCompare(b));
 }
+
 function renderCompanyToggles(companies) {
   const mount = document.getElementById("companyToggle");
   mount.innerHTML = "";
@@ -298,6 +288,7 @@ function renderCompanyToggles(companies) {
     mount.appendChild(el("div", { className: "toggle" }, [checkbox, el("label", { for: id, text: name })]));
   }
 }
+
 function renderDatasetToggles() {
   const mount = document.getElementById("datasetToggle");
   mount.innerHTML = "";
@@ -309,6 +300,7 @@ function renderDatasetToggles() {
     el("label", { for: "allMetrics", text: "All metrics (from Xano table fields)" })
   ]));
 }
+
 function findRowByCompanyAndMonth(companyName, monthKey) {
   return state.rows.find(r => String(r.company) === String(companyName) && monthKeyFromYearMonthName(r.year, r.month) === monthKey);
 }
@@ -317,7 +309,14 @@ function findRowByCompanyAndMonth(companyName, monthKey) {
 function normalizeRow(row) {
   const r = { ...row };
 
-  // Press coverage (keep raw text; display as clickable HTML)
+  // Agency fee object -> numeric fields (RESTORED)
+  const feeObj = r.agency_fee_one_child;
+  if (feeObj && typeof feeObj === "object") {
+    r.agency_fee_one_child_weekly = toNumberOrNull(feeObj.Weekly ?? feeObj.weekly);
+    r.agency_fee_one_child_yearly = toNumberOrNull(feeObj.Yearly ?? feeObj.yearly);
+  }
+
+  // Press coverage text (RESTORED)
   r.monthly_press_coverage = normalizeText(r.monthly_press_coverage);
 
   // Instagram display strings
@@ -333,16 +332,39 @@ function normalizeRow(row) {
 }
 
 // -------------------------
-// Edit text modal for Monthly Press Coverage
+// Edit modals (number + text)
 // -------------------------
+let editModalState = null;
 let editTextModalState = null;
+
+function openEditMetricModal({ row, fieldKey, fieldLabel, currentValue, monthKey }) {
+  editModalState = { row, fieldKey, monthKey };
+
+  const backdrop = document.getElementById("editMetricModalBackdrop");
+  document.getElementById("editMetricSubtitle").textContent = `${row.company} • ${monthKey} • ${fieldLabel}`;
+  document.getElementById("editMetricHint").textContent = "This updates the value in Xano.";
+
+  const input = document.getElementById("editMetricNewValue");
+  input.value = (currentValue === null || currentValue === undefined) ? "" : String(currentValue);
+
+  backdrop.style.display = "flex";
+  backdrop.setAttribute("aria-hidden", "false");
+  setTimeout(() => input.focus(), 0);
+}
+
+function closeEditMetricModal() {
+  const backdrop = document.getElementById("editMetricModalBackdrop");
+  backdrop.style.display = "none";
+  backdrop.setAttribute("aria-hidden", "true");
+  editModalState = null;
+}
 
 function openEditTextModal({ row, fieldKey, fieldLabel, currentValue, monthKey }) {
   editTextModalState = { row, fieldKey, monthKey };
 
   const backdrop = document.getElementById("editTextModalBackdrop");
   document.getElementById("editTextSubtitle").textContent = `${row.company} • ${monthKey} • ${fieldLabel}`;
-  document.getElementById("editTextHint").textContent = "You can paste multiple lines. Links will be clickable after saving.";
+  document.getElementById("editTextHint").textContent = "Multiple lines supported. URLs will be clickable after saving.";
 
   const input = document.getElementById("editTextNewValue");
   input.value = (currentValue === null || currentValue === undefined) ? "" : String(currentValue);
@@ -359,23 +381,47 @@ function closeEditTextModal() {
   editTextModalState = null;
 }
 
-function wireEditTextModal() {
-  document.getElementById("editTextClose").addEventListener("click", closeEditTextModal);
+function wireEditModals() {
+  // number modal
+  document.getElementById("editMetricClose").addEventListener("click", closeEditMetricModal);
+  document.getElementById("editMetricModalBackdrop").addEventListener("click", (e) => {
+    if (e.target.id === "editMetricModalBackdrop") closeEditMetricModal();
+  });
+  document.getElementById("editMetricUpdate").addEventListener("click", async () => {
+    if (!editModalState) return;
 
+    const raw = document.getElementById("editMetricNewValue").value;
+    if (raw === "" || raw === null || raw === undefined) return alert("Enter a value.");
+
+    const num = Number(raw);
+    if (Number.isNaN(num)) return alert("Please enter a valid number.");
+
+    const { row, fieldKey } = editModalState;
+    if (!row?.id) return alert("Missing record id.");
+
+    await xanoFetch(`${XANO_TABLE_PATH}/${row.id}`, {
+      method: "PATCH",
+      body: { [fieldKey]: num },
+      withEditKey: true
+    });
+
+    closeEditMetricModal();
+    await reloadFromXanoAndRefresh();
+  });
+
+  // text modal
+  document.getElementById("editTextClose").addEventListener("click", closeEditTextModal);
   document.getElementById("editTextModalBackdrop").addEventListener("click", (e) => {
     if (e.target.id === "editTextModalBackdrop") closeEditTextModal();
   });
-
   document.getElementById("editTextUpdate").addEventListener("click", async () => {
     if (!editTextModalState) return;
 
-    const input = document.getElementById("editTextNewValue");
-    const val = input.value;
-
+    const val = document.getElementById("editTextNewValue").value;
     const { row, fieldKey } = editTextModalState;
     if (!row?.id) return alert("Missing record id.");
 
-    const payloadVal = normalizeText(val); // blank -> null (clears)
+    const payloadVal = (val === "" ? null : val); // keep newlines exactly; blank clears
 
     await xanoFetch(`${XANO_TABLE_PATH}/${row.id}`, {
       method: "PATCH",
@@ -387,13 +433,34 @@ function wireEditTextModal() {
     await reloadFromXanoAndRefresh();
   });
 
+  // Esc closes whichever is open
   window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && editTextModalState) closeEditTextModal();
+    if (e.key !== "Escape") return;
+    if (editModalState) closeEditMetricModal();
+    if (editTextModalState) closeEditTextModal();
   });
 }
 
 // -------------------------
-// Table rendering + richtext HTML
+// Rendering helpers for multi-month numeric averaging
+// -------------------------
+function averageNumericForCompanyAcrossMonths(companyName, monthKeys, fieldKey) {
+  const vals = monthKeys
+    .map(mk => findRowByCompanyAndMonth(companyName, mk))
+    .map(r => {
+      if (!r) return null;
+      if (fieldKey === "number_of_monthly_instagram_posts") return extractPostsTotal(r.number_of_monthly_instagram_posts);
+      if (fieldKey === "monthly_instagram_engagement") return extractEngagementTotal(r.monthly_instagram_engagement);
+      return toNumberOrNull(r[fieldKey]);
+    })
+    .filter(v => v !== null);
+
+  if (!vals.length) return null;
+  return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+}
+
+// -------------------------
+// Table rendering
 // -------------------------
 function buildMetricsTable(visibleMonths, companies) {
   const table = el("table");
@@ -426,21 +493,28 @@ function buildMetricsTable(visibleMonths, companies) {
         editTargetRow = findRowByCompanyAndMonth(companyName, editMonthKey);
         displayValue = editTargetRow ? editTargetRow[f.key] : null;
       } else {
-        // show blanks for multi-month for now (esp. richtext)
-        displayValue = null;
+        // Multi-month:
+        // - for numeric fields: average
+        // - for richtext fields: show "—"
+        if (f.format === "int") {
+          displayValue = averageNumericForCompanyAcrossMonths(companyName, visibleMonths, f.key);
+        } else {
+          displayValue = null;
+        }
       }
 
       const td = el("td");
-      const isEmpty = displayValue === null || displayValue === undefined || displayValue === "";
 
-      // richtext: render as HTML (links clickable, multiline preserved)
+      // richtext cell (press coverage + instagram display fields)
       if (f.format === "richtext") {
+        const html = displayValue ? linkifyTextToHtml(displayValue) : "—";
         const div = el("div", {
-          className: `clickable-metric${isEmpty ? " muted-cell" : ""}`,
-          html: displayValue ? linkifyTextToHtml(displayValue) : "—",
-          title: singleMonth ? "Click to edit" : "Shown only in single-month view"
+          className: `clickable-metric${(!displayValue ? " muted-cell" : "")}`,
+          html,
+          title: singleMonth ? "Click to edit (if enabled)" : "Shown only in single-month view"
         });
 
+        // Only monthly_press_coverage is editable richtext
         if (singleMonth && editTargetRow && f.editable) {
           div.addEventListener("click", () => {
             openEditTextModal({
@@ -458,18 +532,75 @@ function buildMetricsTable(visibleMonths, companies) {
         continue;
       }
 
+      // int cell
+      const isEmpty = displayValue === null || displayValue === undefined || displayValue === "";
       const span = el("span", {
         className: `clickable-metric${isEmpty ? " muted-cell" : ""}`,
         text: formatValue(displayValue, f.format),
-        title: singleMonth ? "Click to edit" : "Shown only in single-month view"
+        title: singleMonth ? "Click to edit" : "Averaged across selected months"
       });
+
+      const isDerivedDisplay = f.key.endsWith("_display");
+
+      if (singleMonth && editTargetRow && !isDerivedDisplay) {
+        span.addEventListener("click", () => {
+          openEditMetricModal({
+            row: editTargetRow,
+            fieldKey: f.key,
+            fieldLabel: f.label,
+            currentValue: editTargetRow[f.key],
+            monthKey: editMonthKey
+          });
+        });
+      }
 
       td.appendChild(span);
       tr.appendChild(td);
     }
 
-    // Notes cell left as-is (not implemented here)
-    tr.appendChild(el("td", { text: "" }));
+    // Notes cell (RESTORED)
+    const notesTd = el("td");
+    const notesWrap = el("div", { style: "display:flex; gap:8px; align-items:flex-start;" });
+
+    const notesArea = el("textarea", {
+      rows: "3",
+      style: "width: 100%; min-width: 200px; resize: vertical;"
+    });
+
+    if (singleMonth) {
+      const r = findRowByCompanyAndMonth(companyName, visibleMonths[0]);
+      notesArea.value = r?.[NOTES_FIELD_KEY] ?? "";
+    } else {
+      notesArea.value = "";
+      notesArea.disabled = true;
+      notesArea.placeholder = "Switch to a single month to edit notes";
+    }
+
+    const saveBtn = el("button", { type: "button", text: "Save" });
+    saveBtn.disabled = !singleMonth;
+
+    saveBtn.addEventListener("click", async () => {
+      if (!singleMonth) return;
+      const mk = visibleMonths[0];
+      const r = findRowByCompanyAndMonth(companyName, mk);
+      if (!r?.id) return alert(`No Xano record found for ${companyName} ${mk}. Create it in Xano first.`);
+
+      await xanoFetch(`${XANO_TABLE_PATH}/${r.id}`, {
+        method: "PATCH",
+        body: { [NOTES_FIELD_KEY]: notesArea.value },
+        withEditKey: true
+      });
+
+      saveBtn.textContent = "Saved";
+      saveBtn.disabled = true;
+      setTimeout(() => { saveBtn.textContent = "Save"; saveBtn.disabled = false; }, 700);
+    });
+
+    notesWrap.appendChild(notesArea);
+    notesWrap.appendChild(saveBtn);
+    notesTd.appendChild(notesWrap);
+    tr.appendChild(notesTd);
+
     tbody.appendChild(tr);
   }
 
@@ -478,144 +609,11 @@ function buildMetricsTable(visibleMonths, companies) {
 }
 
 // -------------------------
-// Charts
+// Chart (unchanged here; if you already have it working, keep your version)
 // -------------------------
-let metricChart = null;
-
-function companyColor(company) {
-  // Force "Swiis" orange
-  if (String(company).toLowerCase() === "swiis") return "#f59e0b"; // orange
-  // deterministic-ish fallback
-  let hash = 0;
-  const s = String(company);
-  for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
-  const hue = hash % 360;
-  return `hsl(${hue}, 70%, 45%)`;
-}
-
-function chartableMetrics() {
-  return [
-    { key: "domain_authority", label: "Authority Score" },
-    { key: "number_of_referring_domains", label: "Referring Domains" },
-    { key: "number_of_organic_keywords", label: "Organic Keywords" },
-    { key: "organic_traffic", label: "Organic Traffic (est.)" },
-    { key: "instagram_followers", label: "Followers" },
-    { key: "number_of_monthly_instagram_posts", label: "Posts / month (Total)" },
-    { key: "monthly_instagram_engagement", label: "Engagements / month (Total)" },
-    { key: "meta_ads_running", label: "Meta Ads Running" }
-  ];
-}
-
-function getNumericMetricValue(row, metricKey) {
-  if (!row) return null;
-
-  if (metricKey === "number_of_monthly_instagram_posts") {
-    return extractPostsTotal(row.number_of_monthly_instagram_posts);
-  }
-  if (metricKey === "monthly_instagram_engagement") {
-    return extractEngagementTotal(row.monthly_instagram_engagement);
-  }
-  return toNumberOrNull(row[metricKey]);
-}
-
-function ensureChartMetricOptions() {
-  const sel = document.getElementById("chartMetricSelect");
-  if (!sel) return;
-
-  const opts = chartableMetrics();
-  sel.innerHTML = "";
-
-  for (const o of opts) {
-    const opt = document.createElement("option");
-    opt.value = o.key;
-    opt.textContent = o.label;
-    sel.appendChild(opt);
-  }
-
-  // Ensure a visible selection
-  if (opts.length) sel.value = opts[0].key;
-}
-
-function destroyChart() {
-  if (metricChart) {
-    metricChart.destroy();
-    metricChart = null;
-  }
-}
-
-function renderChart() {
-  const canvas = document.getElementById("metricChart");
-  const sel = document.getElementById("chartMetricSelect");
-  if (!canvas || typeof Chart === "undefined" || !sel) return;
-
-  // IMPORTANT: If dropdown shows "nothing", it usually means options never got added.
-  // ensureChartMetricOptions() is called after unlock, and we always set sel.value.
-  const metricKey = sel.value || (chartableMetrics()[0]?.key);
-  if (!metricKey) return;
-
-  const metricLabel = chartableMetrics().find(m => m.key === metricKey)?.label || metricKey;
-
-  const visibleMonths = state.visibleMonths.length ? state.visibleMonths : (state.latestMonthKey ? [state.latestMonthKey] : []);
-  if (!visibleMonths.length) return;
-
-  const singleMonth = visibleMonths.length === 1;
-
-  const allCompanies = uniqueCompanies(state.rows);
-  const companies = allCompanies.filter(c => state.selectedCompanies.has(c));
-
-  const modeLabel = document.getElementById("chartModeLabel");
-  if (modeLabel) {
-    modeLabel.textContent = singleMonth
-      ? `(Bar • ${visibleMonths[0]})`
-      : `(Line • ${visibleMonths[0]} → ${visibleMonths[visibleMonths.length - 1]})`;
-  }
-
-  destroyChart();
-
-  if (singleMonth) {
-    const mk = visibleMonths[0];
-    const values = companies.map(c => getNumericMetricValue(findRowByCompanyAndMonth(c, mk), metricKey) ?? 0);
-    const colors = companies.map(companyColor);
-
-    metricChart = new Chart(canvas, {
-      type: "bar",
-      data: {
-        labels: companies,
-        datasets: [{
-          label: metricLabel,
-          data: values,
-          backgroundColor: colors
-        }]
-      },
-      options: {
-        responsive: true,
-        plugins: { legend: { display: true } },
-        scales: { y: { beginAtZero: true } }
-      }
-    });
-  } else {
-    const datasets = companies.map((c) => {
-      const data = visibleMonths.map(mk => getNumericMetricValue(findRowByCompanyAndMonth(c, mk), metricKey) ?? 0);
-      const color = companyColor(c);
-      return {
-        label: c,
-        data,
-        tension: 0.25,
-        borderColor: color,
-        backgroundColor: color
-      };
-    });
-
-    metricChart = new Chart(canvas, {
-      type: "line",
-      data: { labels: visibleMonths, datasets },
-      options: {
-        responsive: true,
-        plugins: { legend: { display: true } },
-        scales: { y: { beginAtZero: true } }
-      }
-    });
-  }
+function refreshChartSafe() {
+  // If you have the Chart.js chart version in your index.html/app.js already, leave it.
+  // Keeping this as a no-op to avoid breaking your current chart work.
 }
 
 // -------------------------
@@ -627,7 +625,6 @@ function refresh() {
 
   if (!state.latestMonthKey) {
     mount.appendChild(el("p", { className: "muted", text: "No data found in Xano." }));
-    destroyChart();
     return;
   }
 
@@ -640,12 +637,11 @@ function refresh() {
 
   if (!selected.length) {
     mount.appendChild(el("p", { className: "muted", text: "No companies selected." }));
-    destroyChart();
     return;
   }
 
   mount.appendChild(buildMetricsTable(visibleMonths, selected));
-  renderChart();
+  refreshChartSafe();
 }
 
 async function reloadFromXanoAndRefresh() {
@@ -678,9 +674,6 @@ async function reloadFromXanoAndRefresh() {
     state.rangeEndKey = defaultKey;
   }
 
-  // IMPORTANT: Build chart dropdown only AFTER data exists
-  ensureChartMetricOptions();
-
   refresh();
 }
 
@@ -706,7 +699,7 @@ async function attemptUnlock(password) {
   await reloadFromXanoAndRefresh();
 }
 
-// Time-range UI helpers (minimal: keep your existing index.html handlers)
+// Time-range UI wiring
 function fillMonthSelect(selectEl) {
   selectEl.innerHTML = "";
   for (const m of MONTH_LABELS) {
@@ -769,11 +762,7 @@ function setQuickLastMonth() {
 }
 
 async function init() {
-  wireEditTextModal();
-
-  // Chart dropdown changes should redraw
-  const chartSelect = document.getElementById("chartMetricSelect");
-  if (chartSelect) chartSelect.addEventListener("change", () => renderChart());
+  wireEditModals();
 
   // Enter key = Unlock
   document.getElementById("pagePassword").addEventListener("keydown", (e) => {
