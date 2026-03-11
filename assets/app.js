@@ -14,14 +14,17 @@ const METRIC_FIELDS = [
   { key: "number_of_organic_keywords", label: "Organic Keywords", format: "int" },
   { key: "organic_traffic", label: "Organic Traffic (est.)", format: "int" },
   { key: "instagram_followers", label: "Followers", format: "int" },
-  { key: "number_of_monthly_instagram_posts", label: "Posts / month", format: "int" },
-  { key: "monthly_instagram_engagement", label: "Engagements / month", format: "int" },
 
-  // Derived from Xano object field: agency_fee_one_child (e.g. { Weekly: 520, Yearly: 27040 })
+  // Show breakdown strings for instagram objects (not just totals)
+  { key: "number_of_monthly_instagram_posts_display", label: "Posts / month", format: "text" },
+  { key: "monthly_instagram_engagement_display", label: "Engagements / month", format: "text" },
+
   { key: "agency_fee_one_child_weekly", label: "Agency Fee (1 child) / week", format: "int" },
   { key: "agency_fee_one_child_yearly", label: "Agency Fee (1 child) / year", format: "int" },
 
   { key: "meta_ads_running", label: "Meta Ads Running", format: "int" },
+
+  // Press coverage sometimes comes back as string/object; display safely
   { key: "monthly_press_coverage", label: "Monthly Press Coverage", format: "int" }
 ];
 
@@ -51,12 +54,37 @@ function toNumberOrNull(v) {
 
 function formatValue(v, format) {
   if (v === null || v === undefined || v === "") return "—";
+
   if (format === "int") {
     const n = Number(v);
     if (Number.isNaN(n)) return "—";
     return n.toLocaleString();
   }
+
+  // text format
   return String(v);
+}
+
+// Pretty-print a Xano object as "key: value, key2: value2"
+function objectBreakdown(obj, { preferKeys = [], labelMap = {} } = {}) {
+  if (!obj || typeof obj !== "object") return null;
+
+  const entries = Object.entries(obj)
+    .filter(([, v]) => v !== null && v !== undefined && v !== "" && !Number.isNaN(Number(v)) && !(typeof v === "object"))
+    .map(([k, v]) => [labelMap[k] || k, Number(v)]);
+
+  // if preferKeys provided, order those first
+  const prefer = new Set(preferKeys.map(String));
+  entries.sort((a, b) => {
+    const aPref = prefer.has(a[0]) ? 0 : 1;
+    const bPref = prefer.has(b[0]) ? 0 : 1;
+    if (aPref !== bPref) return aPref - bPref;
+    return String(a[0]).localeCompare(String(b[0]));
+  });
+
+  if (!entries.length) return null;
+
+  return entries.map(([k, v]) => `${k}: ${v.toLocaleString()}`).join(", ");
 }
 
 const MONTHS = {
@@ -196,20 +224,15 @@ async function verifyPassword(pw) {
 // App state
 // -------------------------
 const state = {
-  // concrete list of YYYY-MM keys currently shown
   visibleMonths: [],
-
-  // current selected custom range keys
   rangeStartKey: null,
   rangeEndKey: null,
-
-  // overall min/max months found in Xano data (for dropdown bounds)
   minMonthKey: null,
   maxMonthKey: null,
 
   selectedCompanies: new Set(),
-  rows: [],              // normalized rows
-  latestMonthKey: null   // YYYY-MM latest month in Xano data
+  rows: [],
+  latestMonthKey: null
 };
 
 // -------------------------
@@ -280,34 +303,57 @@ function findRowByCompanyAndMonth(companyName, monthKey) {
 function normalizeRow(row) {
   const r = { ...row };
 
+  // Agency fee object -> numeric fields
   const feeObj = r.agency_fee_one_child;
   if (feeObj && typeof feeObj === "object") {
     r.agency_fee_one_child_weekly = toNumberOrNull(feeObj.Weekly ?? feeObj.weekly);
     r.agency_fee_one_child_yearly = toNumberOrNull(feeObj.Yearly ?? feeObj.yearly);
   }
 
+  // Monthly press coverage: force numeric if possible (fixes "—" when Xano returns "0" or " 0 ")
+  const press = toNumberOrNull(r.monthly_press_coverage);
+  if (press !== null) r.monthly_press_coverage = press;
+
+  // Instagram posts breakdown display
   const postsObj = r.number_of_monthly_instagram_posts;
   if (postsObj && typeof postsObj === "object") {
-    const total = toNumberOrNull(postsObj.total) ?? toNumberOrNull(postsObj.total_posts);
-    if (total !== null) r.number_of_monthly_instagram_posts = total;
-    else {
-      r.number_of_monthly_instagram_posts = Object.values(postsObj)
-        .map(toNumberOrNull)
-        .filter(v => v !== null)
-        .reduce((a, b) => a + b, 0);
-    }
+    r.number_of_monthly_instagram_posts_display =
+      objectBreakdown(postsObj, {
+        preferKeys: ["total", "total_posts", "image_graphic", "video", "carousel", "reel", "story"],
+        labelMap: {
+          image_graphic: "Image",
+          video: "Video",
+          carousel: "Carousel",
+          reel: "Reel",
+          story: "Story",
+          total: "Total",
+          total_posts: "Total"
+        }
+      }) || "—";
+  } else {
+    // fallback to a single number if it's not an object
+    r.number_of_monthly_instagram_posts_display =
+      (toNumberOrNull(postsObj) !== null) ? String(Number(postsObj).toLocaleString()) : "—";
   }
 
+  // Instagram engagement breakdown display
   const engObj = r.monthly_instagram_engagement;
   if (engObj && typeof engObj === "object") {
-    const total = toNumberOrNull(engObj.total_engagement) ?? toNumberOrNull(engObj.total);
-    if (total !== null) r.monthly_instagram_engagement = total;
-    else {
-      r.monthly_instagram_engagement = Object.values(engObj)
-        .map(toNumberOrNull)
-        .filter(v => v !== null)
-        .reduce((a, b) => a + b, 0);
-    }
+    r.monthly_instagram_engagement_display =
+      objectBreakdown(engObj, {
+        preferKeys: ["total_engagement", "total", "likes", "comments", "shares", "saves"],
+        labelMap: {
+          total_engagement: "Total",
+          total: "Total",
+          likes: "Likes",
+          comments: "Comments",
+          shares: "Shares",
+          saves: "Saves"
+        }
+      }) || "—";
+  } else {
+    r.monthly_instagram_engagement_display =
+      (toNumberOrNull(engObj) !== null) ? String(Number(engObj).toLocaleString()) : "—";
   }
 
   return r;
@@ -422,12 +468,17 @@ function buildMetricsTable(visibleMonths, companies) {
         editTargetRow = findRowByCompanyAndMonth(companyName, editMonthKey);
         displayValue = editTargetRow ? editTargetRow[f.key] : null;
       } else {
-        const vals = visibleMonths
-          .map(mk => findRowByCompanyAndMonth(companyName, mk)?.[f.key])
-          .filter(v => v !== null && v !== undefined && v !== "" && !Number.isNaN(Number(v)))
-          .map(Number);
+        // For text breakdown fields, averaging makes no sense -> show "—" in multi-month view
+        if (f.format === "text") {
+          displayValue = "—";
+        } else {
+          const vals = visibleMonths
+            .map(mk => findRowByCompanyAndMonth(companyName, mk)?.[f.key])
+            .filter(v => v !== null && v !== undefined && v !== "" && !Number.isNaN(Number(v)))
+            .map(Number);
 
-        if (vals.length) displayValue = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+          if (vals.length) displayValue = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+        }
       }
 
       const td = el("td");
@@ -436,10 +487,12 @@ function buildMetricsTable(visibleMonths, companies) {
       const span = el("span", {
         className: `clickable-metric${isEmpty ? " muted-cell" : ""}`,
         text: formatValue(displayValue, f.format),
-        title: singleMonth ? "Click to edit" : "Switch to a single month to edit"
+        title: singleMonth ? "Click to edit" : (f.format === "text" ? "Breakdown shown only in single-month view" : "Switch to a single month to edit")
       });
 
-      if (singleMonth && editTargetRow) {
+      // Disable editing for breakdown display fields (they are derived)
+      const isDerived = f.key.endsWith("_display");
+      if (singleMonth && editTargetRow && !isDerived) {
         span.addEventListener("click", () => {
           openEditMetricModal({
             row: editTargetRow,
@@ -449,12 +502,15 @@ function buildMetricsTable(visibleMonths, companies) {
             monthKey: editMonthKey
           });
         });
+      } else {
+        span.classList.add("muted-cell");
       }
 
       td.appendChild(span);
       tr.appendChild(td);
     }
 
+    // Notes cell (unchanged)
     const notesTd = el("td");
     const notesWrap = el("div", { style: "display:flex; gap:8px; align-items:flex-start;" });
 
@@ -518,7 +574,6 @@ function refresh() {
   }
 
   const visibleMonths = state.visibleMonths.length ? state.visibleMonths : [state.latestMonthKey];
-
   const allCompanies = uniqueCompanies(state.rows);
   const selected = allCompanies.filter(c => state.selectedCompanies.has(c));
 
@@ -534,7 +589,7 @@ function refresh() {
 }
 
 // -------------------------
-// Export
+// Export helpers
 // -------------------------
 function exportVisibleToCsv() {
   const visibleMonths = state.visibleMonths.length ? state.visibleMonths : [state.latestMonthKey];
@@ -556,11 +611,14 @@ function exportVisibleToCsv() {
       if (singleMonth) {
         v = findRowByCompanyAndMonth(companyName, visibleMonths[0])?.[f.key];
       } else {
-        const vals = visibleMonths
-          .map(mk => findRowByCompanyAndMonth(companyName, mk)?.[f.key])
-          .filter(x => x !== null && x !== undefined && x !== "" && !Number.isNaN(Number(x)))
-          .map(Number);
-        v = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : "";
+        v = (f.format === "text") ? "" : "";
+        if (f.format !== "text") {
+          const vals = visibleMonths
+            .map(mk => findRowByCompanyAndMonth(companyName, mk)?.[f.key])
+            .filter(x => x !== null && x !== undefined && x !== "" && !Number.isNaN(Number(x)))
+            .map(Number);
+          v = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : "";
+        }
       }
       row.push(csvEscape(v));
     }
@@ -600,8 +658,10 @@ function downloadBlob(filename, mime, content) {
 }
 
 // -------------------------
-// Time-range UI wiring
+// Time-range UI wiring (same as before, omitted here for brevity?)
 // -------------------------
+// NOTE: You asked for whole-file replacements, so we keep everything below too.
+
 function fillMonthSelect(selectEl) {
   selectEl.innerHTML = "";
   for (const m of MONTH_LABELS) {
@@ -657,13 +717,6 @@ function applyCustomRangeFromSelectors() {
   refresh();
 }
 
-// IMPORTANT CHANGE YOU REQUESTED:
-// "This month" and "Last month" are based on the *current real month* (today),
-// NOT the latest month in Xano.
-//
-// Today is 2026-03-11, so:
-// - This Month => 2026-03
-// - Last Month => 2026-02
 function currentMonthKeyUTC() {
   const now = new Date();
   const yyyy = now.getUTCFullYear();
@@ -683,8 +736,6 @@ function setQuickThisMonth() {
   document.getElementById("quickLastMonth").checked = false;
 
   const key = currentMonthKeyUTC();
-
-  // If the month doesn't exist in Xano data, show empty table but keep range.
   state.rangeStartKey = key;
   state.rangeEndKey = key;
   state.visibleMonths = [key];
@@ -708,7 +759,7 @@ function setQuickLastMonth() {
 }
 
 // -------------------------
-// Lock screen / init
+// Load / init
 // -------------------------
 async function reloadFromXanoAndRefresh() {
   const rows = await xanoFetch(XANO_TABLE_PATH, { method: "GET", withEditKey: false });
@@ -716,7 +767,6 @@ async function reloadFromXanoAndRefresh() {
 
   state.rows = raw.map(normalizeRow);
 
-  // Compute bounds from ALL data in Xano
   state.latestMonthKey = computeLatestMonthKey(state.rows);
   const { min, max } = computeMinMaxMonthKey(state.rows);
   state.minMonthKey = min;
@@ -735,8 +785,6 @@ async function reloadFromXanoAndRefresh() {
   renderCompanyToggles(companies);
   renderDatasetToggles();
 
-  // Default visible months (on first load):
-  // Prefer "this month" from real clock, but if it's outside dataset, fall back to latest in Xano.
   if (!state.visibleMonths.length) {
     const thisKey = currentMonthKeyUTC();
     const okWithinDataset =
@@ -801,6 +849,15 @@ async function init() {
   document.getElementById("lockBtn").addEventListener("click", () => {
     clearEditKey();
     setLockedUI(true);
+  });
+
+  // ENTER KEY = Unlock (your request)
+  const passwordInput = document.getElementById("pagePassword");
+  passwordInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      document.getElementById("unlockBtn").click();
+    }
   });
 
   document.getElementById("unlockBtn").addEventListener("click", async () => {
