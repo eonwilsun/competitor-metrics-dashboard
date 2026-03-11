@@ -8,6 +8,11 @@
   --btnText: #ffffff;
 }
 
+/* Prevent width:100% inputs from overflowing due to padding/borders */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
   padding: 24px;
@@ -25,6 +30,12 @@ body {
 .subtle {
   margin: 0;
   color: var(--muted);
+}
+
+/* Form controls */
+input, textarea, select {
+  box-sizing: border-box;
+  max-width: 100%;
 }
 
 .controls {
