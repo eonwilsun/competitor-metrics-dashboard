@@ -304,6 +304,7 @@ async function xanoFetch(path, { method = "GET", body = null, withEditKey = true
   return await res.json();
 }
 
+// password check (still used for unlock)
 async function fetchEditKeyFromXano() {
   const res = await xanoFetch(XANO_CONFIG_PATH, { method: "GET", withEditKey: false });
   const rows = Array.isArray(res) ? res : (res?.items || res?.data || []);
@@ -378,6 +379,7 @@ function findRowByCompanyAndMonth(companyName, monthKey) {
 function normalizeRow(row) {
   const r = { ...row };
 
+  // derived fee fields from object
   const feeObj = r.agency_fee_one_child;
   if (feeObj && typeof feeObj === "object") {
     r.agency_fee_one_child_weekly = toNumberOrNull(feeObj.Weekly ?? feeObj.weekly);
@@ -388,27 +390,23 @@ function normalizeRow(row) {
 
   r.number_of_monthly_instagram_posts_display =
     formatPostsBreakdown(r.number_of_monthly_instagram_posts) ??
-    (toNumberOrNull(r.number_of_monthly_instagram_posts) !== null ? Number(r.number_of_monthly_instagram_posts).toLocaleString() : null);
+    (toNumberOrNull(r.number_of_monthly_instagram_posts) !== null
+      ? Number(r.number_of_monthly_instagram_posts).toLocaleString()
+      : null);
 
   r.monthly_instagram_engagement_display =
     formatEngagementBreakdown(r.monthly_instagram_engagement) ??
-    (toNumberOrNull(r.monthly_instagram_engagement) !== null ? Number(r.monthly_instagram_engagement).toLocaleString() : null);
+    (toNumberOrNull(r.monthly_instagram_engagement) !== null
+      ? Number(r.monthly_instagram_engagement).toLocaleString()
+      : null);
 
   return r;
 }
 
-// -------------------------
-// Save payload helper (FIX for "Missing param: year")
-// -------------------------
-function buildUpdatePayload(row, patch) {
-  // Xano endpoint appears to require year (and likely month/company).
-  // Always send them if we have them.
-  const base = {};
-  if (row && row.year !== undefined && row.year !== null) base.year = row.year;
-  if (row && row.month !== undefined && row.month !== null) base.month = row.month;
-  if (row && row.company !== undefined && row.company !== null) base.company = row.company;
-
-  return { ...base, ...patch };
+function getRowId(row) {
+  // support either convention
+  const id = row?.id ?? row?.competitor_metrics_dashboard_id;
+  return (id === null || id === undefined || id === "") ? null : id;
 }
 
 // -------------------------
@@ -445,7 +443,7 @@ function openEditTextModal({ row, fieldKey, fieldLabel, currentValue, monthKey }
 
   const backdrop = document.getElementById("editTextModalBackdrop");
   document.getElementById("editTextSubtitle").textContent = `${row.company} • ${monthKey} • ${fieldLabel}`;
-  document.getElementById("editTextHint").textContent = "Multiple lines supported. URLs will be clickable after saving.";
+  document.getElementById("editTextHint").textContent = "Multiple lines supported. Ctrl+Enter saves.";
 
   const textarea = document.getElementById("editTextNewValue");
   textarea.value = (currentValue === null || currentValue === undefined) ? "" : String(currentValue);
@@ -462,7 +460,7 @@ function openEditNotesModal({ row, monthKey }) {
 
   const backdrop = document.getElementById("editTextModalBackdrop");
   document.getElementById("editTextSubtitle").textContent = `${row.company} • ${monthKey} • Notes`;
-  document.getElementById("editTextHint").textContent = "Edit notes (multi-line). Saved to Xano.";
+  document.getElementById("editTextHint").textContent = "Edit notes (multi-line). Ctrl+Enter saves.";
 
   const textarea = document.getElementById("editTextNewValue");
   textarea.value = row?.[NOTES_FIELD_KEY] ?? "";
@@ -484,13 +482,34 @@ function closeEditTextModal() {
 }
 
 function wireEditModals() {
-  // number modal close
+  // close buttons/backdrops
   document.getElementById("editMetricClose").addEventListener("click", closeEditMetricModal);
   document.getElementById("editMetricModalBackdrop").addEventListener("click", (e) => {
     if (e.target.id === "editMetricModalBackdrop") closeEditMetricModal();
   });
 
-  // number modal update
+  document.getElementById("editTextClose").addEventListener("click", closeEditTextModal);
+  document.getElementById("editTextModalBackdrop").addEventListener("click", (e) => {
+    if (e.target.id === "editTextModalBackdrop") closeEditTextModal();
+  });
+
+  // Enter saves number modal
+  document.getElementById("editMetricNewValue").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      document.getElementById("editMetricUpdate").click();
+    }
+  });
+
+  // Ctrl+Enter saves text modal (keeps Enter for newline)
+  document.getElementById("editTextNewValue").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      document.getElementById("editTextUpdate").click();
+    }
+  });
+
+  // update number modal
   document.getElementById("editMetricUpdate").addEventListener("click", async () => {
     if (!editModalState) return;
 
@@ -503,17 +522,16 @@ function wireEditModals() {
     if (Number.isNaN(num)) return alert("Please enter a valid number.");
 
     const { row, fieldKey } = editModalState;
-    if (!row?.id) return alert("Missing record id.");
+    const rowId = getRowId(row);
+    if (!rowId) return alert("Missing record id.");
 
     try {
       btn.disabled = true;
       btn.textContent = "Saving...";
 
-      const payload = buildUpdatePayload(row, { [fieldKey]: num });
-
-      await xanoFetch(`${XANO_TABLE_PATH}/${row.id}`, {
+      await xanoFetch(`${XANO_TABLE_PATH}/${rowId}`, {
         method: "PATCH",
-        body: payload,
+        body: { [fieldKey]: num },
         withEditKey: true
       });
 
@@ -527,13 +545,7 @@ function wireEditModals() {
     }
   });
 
-  // shared text modal close
-  document.getElementById("editTextClose").addEventListener("click", closeEditTextModal);
-  document.getElementById("editTextModalBackdrop").addEventListener("click", (e) => {
-    if (e.target.id === "editTextModalBackdrop") closeEditTextModal();
-  });
-
-  // shared text modal update
+  // update text modal (press/notes)
   document.getElementById("editTextUpdate").addEventListener("click", async () => {
     const mode = document.getElementById("editTextUpdate").dataset.mode || "";
     const btn = document.getElementById("editTextUpdate");
@@ -545,12 +557,13 @@ function wireEditModals() {
       btn.textContent = "Saving...";
 
       if (mode === "press") {
-        if (!editTextModalState?.row?.id) return alert("Missing record id.");
-        const payload = buildUpdatePayload(editTextModalState.row, { monthly_press_coverage: payloadVal });
+        const row = editTextModalState?.row;
+        const rowId = getRowId(row);
+        if (!rowId) return alert("Missing record id.");
 
-        await xanoFetch(`${XANO_TABLE_PATH}/${editTextModalState.row.id}`, {
+        await xanoFetch(`${XANO_TABLE_PATH}/${rowId}`, {
           method: "PATCH",
-          body: payload,
+          body: { monthly_press_coverage: payloadVal },
           withEditKey: true
         });
 
@@ -560,12 +573,13 @@ function wireEditModals() {
       }
 
       if (mode === "notes") {
-        if (!editNotesModalState?.row?.id) return alert("Missing record id.");
-        const payload = buildUpdatePayload(editNotesModalState.row, { [NOTES_FIELD_KEY]: payloadVal });
+        const row = editNotesModalState?.row;
+        const rowId = getRowId(row);
+        if (!rowId) return alert("Missing record id.");
 
-        await xanoFetch(`${XANO_TABLE_PATH}/${editNotesModalState.row.id}`, {
+        await xanoFetch(`${XANO_TABLE_PATH}/${rowId}`, {
           method: "PATCH",
-          body: payload,
+          body: { [NOTES_FIELD_KEY]: payloadVal },
           withEditKey: true
         });
 
@@ -581,6 +595,7 @@ function wireEditModals() {
     }
   });
 
+  // Esc closes
   window.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
     if (editModalState) closeEditMetricModal();
@@ -983,8 +998,14 @@ function setRangeSelectorsFromKeys(startKey, endKey) {
 }
 
 function applyCustomRangeFromSelectors() {
-  const startKey = monthKeyFromYYYYMMParts(document.getElementById("startYear").value, document.getElementById("startMonth").value);
-  const endKey = monthKeyFromYYYYMMParts(document.getElementById("endYear").value, document.getElementById("endMonth").value);
+  const startKey = monthKeyFromYYYYMMParts(
+    document.getElementById("startYear").value,
+    document.getElementById("startMonth").value
+  );
+  const endKey = monthKeyFromYYYYMMParts(
+    document.getElementById("endYear").value,
+    document.getElementById("endMonth").value
+  );
   if (compareMonthKey(startKey, endKey) > 0) return alert("Start month must be before (or the same as) End month.");
 
   document.getElementById("quickThisMonth").checked = false;
@@ -1028,6 +1049,7 @@ async function init() {
   const chartSelect = document.getElementById("chartMetricSelect");
   if (chartSelect) chartSelect.addEventListener("change", renderChart);
 
+  // Enter = Unlock
   document.getElementById("pagePassword").addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -1062,7 +1084,6 @@ async function init() {
         fillMonthSelect(document.getElementById("endMonth"));
         setRangeSelectorsFromKeys(state.rangeStartKey, state.rangeEndKey);
       }
-
     } catch (err) {
       clearEditKey();
       errMount.textContent = `Unlock failed: ${String(err?.message || err)}`;
