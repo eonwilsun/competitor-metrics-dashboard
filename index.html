@@ -128,10 +128,10 @@
       width: 100%;
     }
 
-    /* Metrics clickable values (we remove underline via JS too, but do it here as well) */
+    /* remove underlines by default */
     .clickable-metric {
       cursor: pointer;
-      text-decoration: none; /* remove underlines */
+      text-decoration: none;
       text-underline-offset: 2px;
     }
     .clickable-metric.muted-cell {
@@ -139,13 +139,9 @@
       opacity: 0.85;
     }
 
-    /* Make all links (press coverage / notes) not underlined unless hovered */
-    #metricsDisplay a {
-      text-decoration: none;
-    }
-    #metricsDisplay a:hover {
-      text-decoration: underline;
-    }
+    /* Links in metrics: not underlined unless hovered */
+    #metricsDisplay a { text-decoration: none; }
+    #metricsDisplay a:hover { text-decoration: underline; }
 
     /* Charts */
     .chart-wrap {
@@ -240,14 +236,7 @@
           <div id="companyToggle" class="toggle-grid"></div>
         </div>
 
-        <div class="control-block">
-          <h2>Datasets</h2>
-          <div class="control-actions">
-            <button id="datasetsAllOn" type="button">All on</button>
-            <button id="datasetsAllOff" type="button">All off</button>
-          </div>
-          <div id="datasetToggle" class="toggle-grid"></div>
-        </div>
+        <!-- DATASETS SECTION REMOVED -->
 
         <div class="control-block">
           <h2>Export</h2>
@@ -266,7 +255,6 @@
 
         <div id="metricsDisplay" class="table-wrap"></div>
 
-        <!-- Charts under the metrics box -->
         <div class="chart-wrap">
           <div class="chart-controls">
             <strong>Chart</strong>
@@ -334,12 +322,8 @@
     </div>
   </div>
 
-  <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-
-  <!-- optional xlsx already in your project -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-
   <script src="assets/app.js"></script>
 </body>
 </html>
