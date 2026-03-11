@@ -441,7 +441,7 @@ function buildPatchBodyForMetric(row, fieldKey, rawNum) {
 }
 
 // -------------------------
-// Last-updated + chart download UI helpers (NO HTML changes needed)
+// Last updated + chart download
 // -------------------------
 function formatUtcTimestamp(dt) {
   const yyyy = dt.getUTCFullYear();
@@ -453,47 +453,10 @@ function formatUtcTimestamp(dt) {
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss} UTC`;
 }
 
-function ensureLastUpdatedRightOfViewingInfo() {
-  const host = document.getElementById("lastUpdated");
-  if (!host) return;
-
-  // Turn host into a flex row: left = existing text, right = last-updated timestamp
-  if (!host.dataset.enhanced) {
-    host.dataset.enhanced = "1";
-    host.style.display = "flex";
-    host.style.justifyContent = "space-between";
-    host.style.gap = "12px";
-
-    const left = document.createElement("span");
-    left.id = "viewingInfo";
-    left.style.flex = "1 1 auto";
-
-    const right = document.createElement("span");
-    right.id = "lastUpdatedAt";
-    right.style.flex = "0 0 auto";
-    right.style.whiteSpace = "nowrap";
-    right.style.opacity = "0.85";
-
-    // move existing text into left
-    left.textContent = host.textContent || "";
-    host.textContent = "";
-    host.appendChild(left);
-    host.appendChild(right);
-  }
-}
-
-function setViewingAndLastUpdatedText(viewingText) {
-  ensureLastUpdatedRightOfViewingInfo();
-
-  const left = document.getElementById("viewingInfo") || document.getElementById("lastUpdated");
-  if (left) left.textContent = viewingText;
-
-  const right = document.getElementById("lastUpdatedAt");
-  if (right) {
-    right.textContent = state.lastLoadedAtUtc
-      ? `Last updated: ${formatUtcTimestamp(state.lastLoadedAtUtc)}`
-      : "";
-  }
+function setLastUpdatedAtText() {
+  const el = document.getElementById("lastUpdatedAt");
+  if (!el) return;
+  el.textContent = state.lastLoadedAtUtc ? `Last updated: ${formatUtcTimestamp(state.lastLoadedAtUtc)}` : "";
 }
 
 function downloadDataUrl(filename, dataUrl) {
@@ -543,49 +506,14 @@ function downloadChartPdfViaPrint() {
   w.focus();
 }
 
-function ensureChartDownloadButtons() {
-  const canvas = document.getElementById("metricChart");
-  if (!canvas) return;
+function wireChartDownloadButtons() {
+  const pngBtn = document.getElementById("downloadChartPng");
+  const jpgBtn = document.getElementById("downloadChartJpg");
+  const pdfBtn = document.getElementById("downloadChartPdf");
 
-  // Only insert once
-  if (document.getElementById("chartDownloadButtons")) return;
-
-  const wrap = document.createElement("div");
-  wrap.id = "chartDownloadButtons";
-  wrap.style.display = "inline-flex";
-  wrap.style.gap = "8px";
-  wrap.style.marginLeft = "12px";
-  wrap.style.alignItems = "center";
-  wrap.style.flexWrap = "wrap";
-
-  const mkBtn = (id, text, onClick) => {
-    const b = document.createElement("button");
-    b.id = id;
-    b.type = "button";
-    b.textContent = text;
-    b.style.padding = "6px 10px";
-    b.style.border = "1px solid #d0d0d0";
-    b.style.borderRadius = "8px";
-    b.style.background = "#fff";
-    b.style.cursor = "pointer";
-    b.addEventListener("click", onClick);
-    return b;
-  };
-
-  wrap.appendChild(mkBtn("downloadChartPng", "Download PNG", () => downloadChartAs("image/png")));
-  wrap.appendChild(mkBtn("downloadChartJpg", "Download JPG", () => downloadChartAs("image/jpeg")));
-  wrap.appendChild(mkBtn("downloadChartPdf", "PDF (Print)", downloadChartPdfViaPrint));
-
-  // Try to place next to metric select if available
-  const metricSelect = document.getElementById("chartMetricSelect");
-  if (metricSelect && metricSelect.parentElement) {
-    metricSelect.parentElement.appendChild(wrap);
-    return;
-  }
-
-  // Otherwise, place above canvas
-  const parent = canvas.parentElement;
-  if (parent) parent.insertBefore(wrap, canvas);
+  if (pngBtn) pngBtn.addEventListener("click", () => downloadChartAs("image/png"));
+  if (jpgBtn) jpgBtn.addEventListener("click", () => downloadChartAs("image/jpeg"));
+  if (pdfBtn) pdfBtn.addEventListener("click", downloadChartPdfViaPrint);
 }
 
 // -------------------------
@@ -967,8 +895,6 @@ function renderChart() {
   const modeLabel = document.getElementById("chartModeLabel");
   if (!canvas || !sel || typeof Chart === "undefined") return;
 
-  ensureChartDownloadButtons();
-
   if (sel.options.length === 0) ensureChartMetricOptions(true);
 
   const metricKey = sel.value;
@@ -1080,9 +1006,9 @@ function refresh() {
   const visibleMonths = state.visibleMonths.length ? state.visibleMonths : [state.latestMonthKey];
   const selected = uniqueCompanies(state.rows).filter(c => state.selectedCompanies.has(c));
 
-  const viewingText =
+  document.getElementById("lastUpdated").textContent =
     `Loaded from Xano. Latest month in Xano: ${state.latestMonthKey}. Viewing: ${visibleMonths.join(", ")}.`;
-  setViewingAndLastUpdatedText(viewingText);
+  setLastUpdatedAtText();
 
   if (!selected.length) {
     mount.appendChild(el("p", { className: "muted", text: "No companies selected." }));
@@ -1106,7 +1032,7 @@ async function reloadFromXanoAndRefresh() {
   state.minMonthKey = min;
   state.maxMonthKey = max;
 
-  state.lastLoadedAtUtc = new Date(); // timestamp of when the UI loaded/refreshed
+  state.lastLoadedAtUtc = new Date();
 
   const companies = uniqueCompanies(state.rows);
   if (state.selectedCompanies.size === 0) companies.forEach(c => state.selectedCompanies.add(c));
@@ -1136,8 +1062,7 @@ function setLockedUI(locked) {
   } else {
     lockScreen.classList.add("hidden");
     appRoot.classList.remove("hidden");
-    lockBtn.classList.add("hidden"); // keep original behavior if you intended it
-    lockBtn.classList.remove("hidden"); // show lock button when unlocked
+    lockBtn.classList.remove("hidden");
   }
 }
 
@@ -1230,64 +1155,51 @@ function setQuickLastMonth() {
 async function init() {
   wireEditModals();
   ensureChartMetricOptions(true);
+  wireChartDownloadButtons();
 
   const chartSelect = document.getElementById("chartMetricSelect");
   if (chartSelect) chartSelect.addEventListener("change", renderChart);
 
   // Enter = Unlock
-  const pw = document.getElementById("pagePassword");
-  if (pw) {
-    pw.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        document.getElementById("unlockBtn").click();
+  document.getElementById("pagePassword").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      document.getElementById("unlockBtn").click();
+    }
+  });
+
+  document.getElementById("applyRange").addEventListener("click", applyCustomRangeFromSelectors);
+  document.getElementById("quickThisMonth").addEventListener("change", (e) => { if (e.target.checked) setQuickThisMonth(); });
+  document.getElementById("quickLastMonth").addEventListener("change", (e) => { if (e.target.checked) setQuickLastMonth(); });
+
+  document.getElementById("lockBtn").addEventListener("click", () => {
+    clearEditKey();
+    setLockedUI(true);
+  });
+
+  document.getElementById("unlockBtn").addEventListener("click", async () => {
+    const pw = document.getElementById("pagePassword").value;
+    const errMount = document.getElementById("lockError");
+    errMount.textContent = "";
+
+    try {
+      await attemptUnlock(pw);
+      setLockedUI(false);
+
+      if (state.minMonthKey && state.maxMonthKey) {
+        const minY = Number(state.minMonthKey.split("-")[0]);
+        const maxY = Number(state.maxMonthKey.split("-")[0]);
+        fillYearSelect(document.getElementById("startYear"), minY, maxY);
+        fillYearSelect(document.getElementById("endYear"), minY, maxY);
+        fillMonthSelect(document.getElementById("startMonth"));
+        fillMonthSelect(document.getElementById("endMonth"));
+        setRangeSelectorsFromKeys(state.rangeStartKey, state.rangeEndKey);
       }
-    });
-  }
-
-  const applyRangeBtn = document.getElementById("applyRange");
-  if (applyRangeBtn) applyRangeBtn.addEventListener("click", applyCustomRangeFromSelectors);
-
-  const thisMonth = document.getElementById("quickThisMonth");
-  if (thisMonth) thisMonth.addEventListener("change", (e) => { if (e.target.checked) setQuickThisMonth(); });
-
-  const lastMonth = document.getElementById("quickLastMonth");
-  if (lastMonth) lastMonth.addEventListener("change", (e) => { if (e.target.checked) setQuickLastMonth(); });
-
-  const lockBtn = document.getElementById("lockBtn");
-  if (lockBtn) {
-    lockBtn.addEventListener("click", () => {
+    } catch (err) {
       clearEditKey();
-      setLockedUI(true);
-    });
-  }
-
-  const unlockBtn = document.getElementById("unlockBtn");
-  if (unlockBtn) {
-    unlockBtn.addEventListener("click", async () => {
-      const pwVal = document.getElementById("pagePassword").value;
-      const errMount = document.getElementById("lockError");
-      if (errMount) errMount.textContent = "";
-
-      try {
-        await attemptUnlock(pwVal);
-        setLockedUI(false);
-
-        if (state.minMonthKey && state.maxMonthKey) {
-          const minY = Number(state.minMonthKey.split("-")[0]);
-          const maxY = Number(state.maxMonthKey.split("-")[0]);
-          fillYearSelect(document.getElementById("startYear"), minY, maxY);
-          fillYearSelect(document.getElementById("endYear"), minY, maxY);
-          fillMonthSelect(document.getElementById("startMonth"));
-          fillMonthSelect(document.getElementById("endMonth"));
-          setRangeSelectorsFromKeys(state.rangeStartKey, state.rangeEndKey);
-        }
-      } catch (err) {
-        clearEditKey();
-        if (errMount) errMount.textContent = `Unlock failed: ${String(err?.message || err)}`;
-      }
-    });
-  }
+      errMount.textContent = `Unlock failed: ${String(err?.message || err)}`;
+    }
+  });
 
   setLockedUI(true);
 }
