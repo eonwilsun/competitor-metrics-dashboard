@@ -55,16 +55,18 @@
       gap: 10px;
       align-items: center;
     }
+
+    /* UPDATED: Collect button is orange with black text + black border */
     .collect-row button {
       padding: 8px 12px;
-      border: 1px solid #d0d0d0;
+      border: 1px solid #000000;
       border-radius: 10px;
-      background: #fff;
-      color: #111;
-      font-weight: 700;
+      background: #ef5d2f;
+      color: #000000;
+      font-weight: 800;
       cursor: pointer;
     }
-    .collect-row button:hover { background: #f3f4f6; }
+    .collect-row button:hover { filter: brightness(0.95); }
     .collect-row .desc {
       color: #666;
       font-size: 13px;
@@ -327,7 +329,6 @@
           Click a number to edit it. Changes save to Xano.
         </p>
 
-        <!-- NEW: Collect Data button -->
         <div class="collect-row">
           <button id="collectDataBtn" type="button">Collect data</button>
           <span class="desc">Click to collect last month’s data.</span>
