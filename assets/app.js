@@ -17,17 +17,14 @@ const METRIC_FIELDS = [
   { key: "organic_traffic", label: "Organic Traffic (est.)", format: "int" },
   { key: "instagram_followers", label: "Followers", format: "int" },
 
-  // display-only strings (single-month)
   { key: "number_of_monthly_instagram_posts_display", label: "Posts / month", format: "richtext" },
   { key: "monthly_instagram_engagement_display", label: "Engagements / month", format: "richtext" },
 
-  // derived from agency_fee_one_child object
   { key: "agency_fee_one_child_weekly", label: "Agency Fee (1 child) / week", format: "int" },
   { key: "agency_fee_one_child_yearly", label: "Agency Fee (1 child) / year", format: "int" },
 
   { key: "meta_ads_running", label: "Meta Ads Running", format: "int" },
 
-  // editable rich text
   { key: "monthly_press_coverage", label: "Monthly Press Coverage", format: "richtext", editable: true }
 ];
 
@@ -63,7 +60,6 @@ function companySort(a, b) {
   return aa.localeCompare(bb);
 }
 
-// UPDATED per request: Swiis = #ef5d2f
 const COMPANY_COLORS = {
   swiis: "#ef5d2f",
   capstone: "#0d66a2",
@@ -79,7 +75,6 @@ function companyColor(company) {
   const key = normalizeCompanyName(company).toLowerCase();
   if (COMPANY_COLORS[key]) return COMPANY_COLORS[key];
 
-  // fallback deterministic color
   let hash = 0;
   for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
   const hue = hash % 360;
@@ -164,7 +159,6 @@ function pickNumberFromObject(obj, keys) {
   return null;
 }
 
-// UPDATED per request: label "Images" (not "Graphic images"), and uses Xano key image_graphic
 function formatPostsBreakdown(obj) {
   if (!obj || typeof obj !== "object") return null;
 
@@ -329,7 +323,6 @@ async function xanoFetch(path, { method = "GET", body = null, withEditKey = true
   return await res.json();
 }
 
-// password check
 async function fetchEditKeyFromXano() {
   const res = await xanoFetch(XANO_CONFIG_PATH, { method: "GET", withEditKey: false });
   const rows = Array.isArray(res) ? res : (res?.items || res?.data || []);
@@ -373,7 +366,6 @@ function computeMinMaxMonthKey(rows) {
   return { min: keys[0] || null, max: keys[keys.length - 1] || null };
 }
 
-// Swiis-first company list
 function uniqueCompanies(rows) {
   const set = new Set(rows.map(r => normalizeCompanyName(r.company)).filter(Boolean));
   return Array.from(set).sort(companySort);
@@ -399,39 +391,26 @@ function renderCompanyToggles(companies) {
   }
 }
 
+// No dataset toggles anymore (Datasets section removed from index.html)
 function renderDatasetToggles() {
-  const mount = document.getElementById("datasetToggle");
-  mount.innerHTML = "";
-
-  const checkbox = el("input", { type: "checkbox", id: "allMetrics" });
-  checkbox.checked = true;
-  checkbox.disabled = true;
-
-  mount.appendChild(el("div", { className: "toggle" }, [
-    checkbox,
-    el("label", { for: "allMetrics", text: "All metrics (from Xano table fields)" })
-  ]));
+  // noop
 }
 
 function findRowByCompanyAndMonth(companyName, monthKey) {
   return state.rows.find(r => String(r.company) === String(companyName) && monthKeyFromYearMonthName(r.year, r.month) === monthKey);
 }
 
-// Normalize rows
 function normalizeRow(row) {
   const r = { ...row };
 
-  // agency fee derived
   const feeObj = r.agency_fee_one_child;
   if (feeObj && typeof feeObj === "object") {
     r.agency_fee_one_child_weekly = toNumberOrNull(feeObj.Weekly ?? feeObj.weekly);
     r.agency_fee_one_child_yearly = toNumberOrNull(feeObj.Yearly ?? feeObj.yearly);
   }
 
-  // press coverage
   r.monthly_press_coverage = normalizeText(r.monthly_press_coverage);
 
-  // instagram display strings
   r.number_of_monthly_instagram_posts_display =
     formatPostsBreakdown(r.number_of_monthly_instagram_posts) ??
     (toNumberOrNull(r.number_of_monthly_instagram_posts) !== null ? Number(r.number_of_monthly_instagram_posts).toLocaleString() : null);
@@ -516,7 +495,6 @@ function closeEditTextModal() {
 }
 
 function wireEditModals() {
-  // number modal
   document.getElementById("editMetricClose").addEventListener("click", closeEditMetricModal);
   document.getElementById("editMetricModalBackdrop").addEventListener("click", (e) => {
     if (e.target.id === "editMetricModalBackdrop") closeEditMetricModal();
@@ -543,13 +521,11 @@ function wireEditModals() {
     await reloadFromXanoAndRefresh();
   });
 
-  // shared text modal close
   document.getElementById("editTextClose").addEventListener("click", closeEditTextModal);
   document.getElementById("editTextModalBackdrop").addEventListener("click", (e) => {
     if (e.target.id === "editTextModalBackdrop") closeEditTextModal();
   });
 
-  // shared text modal update
   document.getElementById("editTextUpdate").addEventListener("click", async () => {
     const mode = document.getElementById("editTextUpdate").dataset.mode || "";
     const val = document.getElementById("editTextNewValue").value;
@@ -645,7 +621,6 @@ function buildMetricsTable(visibleMonths, companies) {
 
       const td = el("td");
 
-      // richtext columns
       if (f.format === "richtext") {
         const html = displayValue ? linkifyTextToHtml(displayValue) : "—";
         const div = el("div", {
@@ -654,8 +629,12 @@ function buildMetricsTable(visibleMonths, companies) {
           title: singleMonth ? "Click to edit" : "Shown only in single-month view"
         });
 
+        // Only open editor if you click the cell background, NOT when clicking a link inside it.
         if (singleMonth && editTargetRow && f.editable) {
-          div.addEventListener("click", () => {
+          div.addEventListener("click", (e) => {
+            // If user clicked an <a>, let it navigate without opening editor
+            if (e.target && e.target.closest && e.target.closest("a")) return;
+
             openEditTextModal({
               row: editTargetRow,
               fieldKey: f.key,
@@ -671,7 +650,6 @@ function buildMetricsTable(visibleMonths, companies) {
         continue;
       }
 
-      // int columns
       const isEmpty = displayValue === null || displayValue === undefined || displayValue === "";
       const span = el("span", {
         className: `clickable-metric metrics-num${isEmpty ? " muted-cell" : ""}`,
@@ -695,7 +673,7 @@ function buildMetricsTable(visibleMonths, companies) {
       tr.appendChild(td);
     }
 
-    // Notes: preview + click to popup (no textarea boxes)
+    // Notes cell: link clicks should NOT open editor either
     const notesTd = el("td");
     let notesRow = null;
     let mk = null;
@@ -714,7 +692,10 @@ function buildMetricsTable(visibleMonths, companies) {
     });
 
     if (singleMonth && notesRow) {
-      notesDiv.addEventListener("click", () => openEditNotesModal({ row: notesRow, monthKey: mk }));
+      notesDiv.addEventListener("click", (e) => {
+        if (e.target && e.target.closest && e.target.closest("a")) return;
+        openEditNotesModal({ row: notesRow, monthKey: mk });
+      });
     }
 
     notesTd.appendChild(notesDiv);
@@ -866,7 +847,6 @@ function refresh() {
   ensureChartMetricOptions(false);
   renderChart();
 
-  // Apply metrics table styling without relying on :has()
   applyMetricsTableStyling();
 }
 
@@ -993,25 +973,21 @@ function applyMetricsTableStyling() {
   const table = root?.querySelector("table");
   if (!table) return;
 
-  // remove underlines globally in metrics display
   root.querySelectorAll(".clickable-metric").forEach((n) => {
     n.style.textDecoration = "none";
   });
 
-  // center ALL cells by default
   table.querySelectorAll("td").forEach((td) => {
     td.style.textAlign = "center";
     td.style.verticalAlign = "middle";
   });
 
-  // company + month left
   table.querySelectorAll("tr").forEach((tr) => {
     const tds = tr.querySelectorAll("td");
     if (tds[0]) tds[0].style.textAlign = "left";
     if (tds[1]) tds[1].style.textAlign = "left";
   });
 
-  // any cell with rich text (div.metrics-rich) should be left aligned
   table.querySelectorAll("td").forEach((td) => {
     if (td.querySelector(".metrics-rich")) td.style.textAlign = "left";
   });
@@ -1027,7 +1003,6 @@ async function init() {
   const chartSelect = document.getElementById("chartMetricSelect");
   if (chartSelect) chartSelect.addEventListener("change", renderChart);
 
-  // Enter = Unlock
   document.getElementById("pagePassword").addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
