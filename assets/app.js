@@ -15,7 +15,7 @@ const METRIC_FIELDS = [
   { key: "organic_traffic", label: "Organic Traffic (est.)", format: "int" },
   { key: "instagram_followers", label: "Followers", format: "int" },
 
-  // Show breakdown strings for instagram objects (not just totals)
+  // Show formatted breakdown strings for instagram objects
   { key: "number_of_monthly_instagram_posts_display", label: "Posts / month", format: "text" },
   { key: "monthly_instagram_engagement_display", label: "Engagements / month", format: "text" },
 
@@ -24,8 +24,8 @@ const METRIC_FIELDS = [
 
   { key: "meta_ads_running", label: "Meta Ads Running", format: "int" },
 
-  // Press coverage sometimes comes back as string/object; display safely
-  { key: "monthly_press_coverage", label: "Monthly Press Coverage", format: "int" }
+  // Press coverage in your Xano table is NOT numeric (it contains text like "Mention - https://...")
+  { key: "monthly_press_coverage", label: "Monthly Press Coverage", format: "text" }
 ];
 
 // Notes field key in Xano
@@ -65,26 +65,64 @@ function formatValue(v, format) {
   return String(v);
 }
 
-// Pretty-print a Xano object as "key: value, key2: value2"
-function objectBreakdown(obj, { preferKeys = [], labelMap = {} } = {}) {
+function formatPercent(v) {
+  const n = toNumberOrNull(v);
+  if (n === null) return null;
+  // Keep as given (your screenshot shows 0.6 meaning 0.6%)
+  // If your Xano stores 0.006 for 0.6%, tell me and we’ll multiply by 100.
+  const s = String(n);
+  return `${s}%`;
+}
+
+function normalizeText(v) {
+  if (v === null || v === undefined) return null;
+  const s = String(v).trim();
+  return s.length ? s : null;
+}
+
+// Build "Images: 7, Reels: 0, Total: 7" from the posts object
+function formatPostsBreakdown(obj) {
   if (!obj || typeof obj !== "object") return null;
 
-  const entries = Object.entries(obj)
-    .filter(([, v]) => v !== null && v !== undefined && v !== "" && !Number.isNaN(Number(v)) && !(typeof v === "object"))
-    .map(([k, v]) => [labelMap[k] || k, Number(v)]);
+  // Your object keys (from screenshot):
+  // - Image
+  // - reels_video
+  // - number_of_monthly_instagram_posts_total
+  const images = toNumberOrNull(obj.Images ?? obj.images ?? obj.Image ?? obj.image);
+  const reels = toNumberOrNull(obj.Reels ?? obj.reels ?? obj.reels_video ?? obj.reel ?? obj.reelsVideo);
+  const total = toNumberOrNull(
+    obj.Total ??
+    obj.total ??
+    obj.number_of_monthly_instagram_posts_total ??
+    obj.total_posts ??
+    obj.number_of_monthly_instagram_posts_total
+  );
 
-  // if preferKeys provided, order those first
-  const prefer = new Set(preferKeys.map(String));
-  entries.sort((a, b) => {
-    const aPref = prefer.has(a[0]) ? 0 : 1;
-    const bPref = prefer.has(b[0]) ? 0 : 1;
-    if (aPref !== bPref) return aPref - bPref;
-    return String(a[0]).localeCompare(String(b[0]));
-  });
+  const parts = [];
+  if (images !== null) parts.push(`Images: ${images.toLocaleString()}`);
+  if (reels !== null) parts.push(`Reels: ${reels.toLocaleString()}`);
+  if (total !== null) parts.push(`Total: ${total.toLocaleString()}`);
 
-  if (!entries.length) return null;
+  if (!parts.length) return null;
+  return parts.join(", ");
+}
 
-  return entries.map(([k, v]) => `${k}: ${v.toLocaleString()}`).join(", ");
+// Build "0.6% engagement rate, total: 94" from engagement object
+function formatEngagementBreakdown(obj) {
+  if (!obj || typeof obj !== "object") return null;
+
+  const rate = obj.engagement_rate_percentage ?? obj.engagementRatePercentage ?? obj.engagement_rate;
+  const total = obj.Total ?? obj.total ?? obj.total_engagement ?? obj.totalEngagement;
+
+  const rateStr = formatPercent(rate);
+  const totalNum = toNumberOrNull(total);
+
+  const parts = [];
+  if (rateStr) parts.push(`${rateStr} engagement rate`);
+  if (totalNum !== null) parts.push(`total: ${totalNum.toLocaleString()}`);
+
+  if (!parts.length) return null;
+  return parts.join(", ");
 }
 
 const MONTHS = {
@@ -310,51 +348,19 @@ function normalizeRow(row) {
     r.agency_fee_one_child_yearly = toNumberOrNull(feeObj.Yearly ?? feeObj.yearly);
   }
 
-  // Monthly press coverage: force numeric if possible (fixes "—" when Xano returns "0" or " 0 ")
-  const press = toNumberOrNull(r.monthly_press_coverage);
-  if (press !== null) r.monthly_press_coverage = press;
+  // Monthly press coverage is TEXT in your Xano table (see screenshot: "Mention - https://...")
+  r.monthly_press_coverage = normalizeText(r.monthly_press_coverage);
 
-  // Instagram posts breakdown display
+  // Instagram breakdown displays
   const postsObj = r.number_of_monthly_instagram_posts;
-  if (postsObj && typeof postsObj === "object") {
-    r.number_of_monthly_instagram_posts_display =
-      objectBreakdown(postsObj, {
-        preferKeys: ["total", "total_posts", "image_graphic", "video", "carousel", "reel", "story"],
-        labelMap: {
-          image_graphic: "Image",
-          video: "Video",
-          carousel: "Carousel",
-          reel: "Reel",
-          story: "Story",
-          total: "Total",
-          total_posts: "Total"
-        }
-      }) || "—";
-  } else {
-    // fallback to a single number if it's not an object
-    r.number_of_monthly_instagram_posts_display =
-      (toNumberOrNull(postsObj) !== null) ? String(Number(postsObj).toLocaleString()) : "—";
-  }
+  r.number_of_monthly_instagram_posts_display =
+    formatPostsBreakdown(postsObj) ??
+    (toNumberOrNull(postsObj) !== null ? Number(postsObj).toLocaleString() : null);
 
-  // Instagram engagement breakdown display
   const engObj = r.monthly_instagram_engagement;
-  if (engObj && typeof engObj === "object") {
-    r.monthly_instagram_engagement_display =
-      objectBreakdown(engObj, {
-        preferKeys: ["total_engagement", "total", "likes", "comments", "shares", "saves"],
-        labelMap: {
-          total_engagement: "Total",
-          total: "Total",
-          likes: "Likes",
-          comments: "Comments",
-          shares: "Shares",
-          saves: "Saves"
-        }
-      }) || "—";
-  } else {
-    r.monthly_instagram_engagement_display =
-      (toNumberOrNull(engObj) !== null) ? String(Number(engObj).toLocaleString()) : "—";
-  }
+  r.monthly_instagram_engagement_display =
+    formatEngagementBreakdown(engObj) ??
+    (toNumberOrNull(engObj) !== null ? Number(engObj).toLocaleString() : null);
 
   return r;
 }
@@ -468,9 +474,9 @@ function buildMetricsTable(visibleMonths, companies) {
         editTargetRow = findRowByCompanyAndMonth(companyName, editMonthKey);
         displayValue = editTargetRow ? editTargetRow[f.key] : null;
       } else {
-        // For text breakdown fields, averaging makes no sense -> show "—" in multi-month view
+        // For text fields, show "—" in multi-month view
         if (f.format === "text") {
-          displayValue = "—";
+          displayValue = null;
         } else {
           const vals = visibleMonths
             .map(mk => findRowByCompanyAndMonth(companyName, mk)?.[f.key])
@@ -482,17 +488,17 @@ function buildMetricsTable(visibleMonths, companies) {
       }
 
       const td = el("td");
-      const isEmpty = displayValue === null || displayValue === undefined;
+      const isEmpty = displayValue === null || displayValue === undefined || displayValue === "";
 
       const span = el("span", {
         className: `clickable-metric${isEmpty ? " muted-cell" : ""}`,
         text: formatValue(displayValue, f.format),
-        title: singleMonth ? "Click to edit" : (f.format === "text" ? "Breakdown shown only in single-month view" : "Switch to a single month to edit")
+        title: singleMonth ? "Click to edit" : (f.format === "text" ? "Shown only in single-month view" : "Switch to a single month to edit")
       });
 
-      // Disable editing for breakdown display fields (they are derived)
       const isDerived = f.key.endsWith("_display");
-      if (singleMonth && editTargetRow && !isDerived) {
+      const isText = f.format === "text";
+      if (singleMonth && editTargetRow && !isDerived && !isText) {
         span.addEventListener("click", () => {
           openEditMetricModal({
             row: editTargetRow,
@@ -502,15 +508,13 @@ function buildMetricsTable(visibleMonths, companies) {
             monthKey: editMonthKey
           });
         });
-      } else {
-        span.classList.add("muted-cell");
       }
 
       td.appendChild(span);
       tr.appendChild(td);
     }
 
-    // Notes cell (unchanged)
+    // Notes cell (same as before)
     const notesTd = el("td");
     const notesWrap = el("div", { style: "display:flex; gap:8px; align-items:flex-start;" });
 
@@ -589,7 +593,7 @@ function refresh() {
 }
 
 // -------------------------
-// Export helpers
+// Export
 // -------------------------
 function exportVisibleToCsv() {
   const visibleMonths = state.visibleMonths.length ? state.visibleMonths : [state.latestMonthKey];
@@ -611,8 +615,8 @@ function exportVisibleToCsv() {
       if (singleMonth) {
         v = findRowByCompanyAndMonth(companyName, visibleMonths[0])?.[f.key];
       } else {
-        v = (f.format === "text") ? "" : "";
-        if (f.format !== "text") {
+        if (f.format === "text") v = "";
+        else {
           const vals = visibleMonths
             .map(mk => findRowByCompanyAndMonth(companyName, mk)?.[f.key])
             .filter(x => x !== null && x !== undefined && x !== "" && !Number.isNaN(Number(x)))
@@ -658,10 +662,8 @@ function downloadBlob(filename, mime, content) {
 }
 
 // -------------------------
-// Time-range UI wiring (same as before, omitted here for brevity?)
+// Time-range UI wiring
 // -------------------------
-// NOTE: You asked for whole-file replacements, so we keep everything below too.
-
 function fillMonthSelect(selectEl) {
   selectEl.innerHTML = "";
   for (const m of MONTH_LABELS) {
@@ -851,7 +853,7 @@ async function init() {
     setLockedUI(true);
   });
 
-  // ENTER KEY = Unlock (your request)
+  // ENTER key submits password (Unlock)
   const passwordInput = document.getElementById("pagePassword");
   passwordInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
