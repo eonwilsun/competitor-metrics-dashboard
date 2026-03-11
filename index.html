@@ -77,7 +77,7 @@
       user-select: none;
     }
 
-    /* Minimal modal styles (for editing numbers) */
+    /* Minimal modal styles (edit number / text) */
     .modal-backdrop {
       position: fixed;
       inset: 0;
@@ -89,7 +89,7 @@
       padding: 16px;
     }
     .modal {
-      width: min(680px, 100%);
+      width: min(720px, 100%);
       background: #fff;
       border-radius: 10px;
       box-shadow: 0 10px 30px rgba(0,0,0,.25);
@@ -119,12 +119,13 @@
       line-height: 1;
     }
     .field-row { display: grid; gap: 6px; margin: 10px 0; }
-    .field-row input {
+    .field-row input, .field-row textarea {
       padding: 10px 12px;
       border: 1px solid #d0d0d0;
       border-radius: 8px;
       font-size: 14px;
       box-sizing: border-box;
+      width: 100%;
     }
     .clickable-metric {
       cursor: pointer;
@@ -135,6 +136,27 @@
       text-decoration: none;
       opacity: 0.85;
     }
+
+    /* Charts */
+    .chart-wrap {
+      margin-top: 14px;
+      border-top: 1px solid #e6e8ee;
+      padding-top: 14px;
+    }
+    .chart-controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+    .chart-controls select {
+      padding: 8px 10px;
+      border: 1px solid #d0d0d0;
+      border-radius: 8px;
+      background: #fff;
+    }
+    canvas { max-width: 100%; }
   </style>
 </head>
 
@@ -166,7 +188,6 @@
     <!-- App -->
     <section id="appRoot" class="hidden">
       <section class="controls" id="controls">
-
         <!-- Time Range -->
         <div class="control-block">
           <h2>Time Range</h2>
@@ -232,12 +253,28 @@
         <p class="muted" style="margin-top:-6px;">
           Click a number to edit it. Changes save to Xano.
         </p>
+
         <div id="metricsDisplay" class="table-wrap"></div>
+
+        <!-- Charts under the metrics box -->
+        <div class="chart-wrap">
+          <div class="chart-controls">
+            <strong>Chart</strong>
+            <span class="muted" id="chartModeLabel"></span>
+
+            <label class="muted" for="chartMetricSelect" style="margin-left: 10px;">Metric:</label>
+            <select id="chartMetricSelect"></select>
+          </div>
+          <canvas id="metricChart" height="120"></canvas>
+          <p class="muted" style="margin-top: 8px;">
+            Single month: bar chart across companies. Multiple months: line chart over time (one metric).
+          </p>
+        </div>
       </section>
     </section>
   </main>
 
-  <!-- Edit Metric Modal -->
+  <!-- Edit Number Modal -->
   <div id="editMetricModalBackdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-hidden="true">
     <div class="modal">
       <div class="modal-header">
@@ -262,7 +299,37 @@
     </div>
   </div>
 
+  <!-- Edit Text Modal (Monthly Press Coverage) -->
+  <div id="editTextModalBackdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal">
+      <div class="modal-header">
+        <div>
+          <div style="font-weight: 700;">Edit text</div>
+          <div class="subtle" id="editTextSubtitle" style="margin-top: 2px;"></div>
+        </div>
+        <button class="modal-close" id="editTextClose" aria-label="Close">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="field-row">
+          <label class="subtle" for="editTextNewValue">New value</label>
+          <textarea id="editTextNewValue" rows="6" placeholder="Type text..."></textarea>
+          <div class="subtle" id="editTextHint"></div>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button id="editTextUpdate" type="button">Update</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <!-- optional xlsx already in your project -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
   <script src="assets/app.js"></script>
 </body>
 </html>
