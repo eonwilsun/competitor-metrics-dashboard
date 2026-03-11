@@ -15,7 +15,7 @@ const METRIC_FIELDS = [
   { key: "number_of_referring_domains", label: "Referring Domains", format: "int" },
   { key: "number_of_organic_keywords", label: "Organic Keywords", format: "int" },
   { key: "organic_traffic", label: "Organic Traffic (est.)", format: "int" },
-  { key: "instagram_followers", label: "Followers", format: "int" },
+  { key: "instagram_followers", label: "Instagram Followers", format: "int" },
 
   // NOTE: These are display fields, but we now PATCH their underlying object totals
   { key: "number_of_monthly_instagram_posts_display", label: "Posts / month", format: "richtext" },
