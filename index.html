@@ -1,5 +1,3 @@
-<!-- IMPORTANT: you asked to always display provided snippets as markdown.
-This is the snippet you provided earlier (index.html). -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -34,6 +32,19 @@ This is the snippet you provided earlier (index.html). -->
       display: flex;
       gap: 8px;
       justify-content: flex-end;
+    }
+
+    /* Top "viewing info" row: left + right */
+    .top-info {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+      flex-wrap: wrap;
+    }
+    .top-info .right {
+      white-space: nowrap;
+      opacity: 0.85;
     }
 
     /* Time-range UI */
@@ -164,6 +175,23 @@ This is the snippet you provided earlier (index.html). -->
       border-radius: 8px;
       background: #fff;
     }
+
+    /* Download buttons */
+    .chart-downloads {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-left: 8px;
+    }
+    .chart-downloads button {
+      padding: 6px 10px;
+      border: 1px solid #d0d0d0;
+      border-radius: 8px;
+      background: #fff;
+      cursor: pointer;
+    }
+
     canvas { max-width: 100%; }
   </style>
 </head>
@@ -171,7 +199,13 @@ This is the snippet you provided earlier (index.html). -->
 <body>
   <header class="header">
     <h1>Competitor Metrics Dashboard</h1>
-    <p class="subtle" id="lastUpdated"></p>
+
+    <!-- Viewing info (left) + Last updated timestamp (right) -->
+    <p class="subtle top-info">
+      <span id="lastUpdated"></span>
+      <span id="lastUpdatedAt" class="right"></span>
+    </p>
+
     <div style="margin-top: 8px;">
       <button id="lockBtn" type="button" class="hidden">Lock</button>
     </div>
@@ -238,8 +272,6 @@ This is the snippet you provided earlier (index.html). -->
           <div id="companyToggle" class="toggle-grid"></div>
         </div>
 
-        <!-- DATASETS SECTION REMOVED -->
-
         <div class="control-block">
           <h2>Export</h2>
           <div class="control-actions">
@@ -264,8 +296,16 @@ This is the snippet you provided earlier (index.html). -->
 
             <label class="muted" for="chartMetricSelect" style="margin-left: 10px;">Metric:</label>
             <select id="chartMetricSelect"></select>
+
+            <div class="chart-downloads" aria-label="Chart downloads">
+              <button id="downloadChartPng" type="button">Download PNG</button>
+              <button id="downloadChartJpg" type="button">Download JPG</button>
+              <button id="downloadChartPdf" type="button">PDF (Print)</button>
+            </div>
           </div>
+
           <canvas id="metricChart" height="120"></canvas>
+
           <p class="muted" style="margin-top: 8px;">
             Single month: bar chart across companies. Multiple months: line chart over time (one metric).
           </p>
