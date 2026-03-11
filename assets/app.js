@@ -2,7 +2,7 @@
 // Xano config
 // -------------------------
 const XANO_BASE_URL = "https://x8ki-letl-twmt.n7.xano.io/api:ZvixoXZ8";
-const XANO_TABLE_PATH = "/competitor_metrics_dashboard";
+const XANO_TABLE_PATH = "/competitor_metrics_dashboard2";
 const XANO_CONFIG_PATH = "/app_config";
 const EDIT_KEY_NAME = "EDIT_KEY";
 const SESSION_KEY = "cmd.editKey.v1";
