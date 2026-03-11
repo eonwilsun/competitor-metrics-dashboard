@@ -102,7 +102,6 @@ function monthKeyFromYYYYMMParts(year, mm) {
 }
 
 function parseMonthKey(mk) {
-  // mk is "YYYY-MM"
   if (!mk || typeof mk !== "string" || mk.length < 7) return null;
   const [y, m] = mk.split("-");
   if (!y || !m) return null;
@@ -110,19 +109,16 @@ function parseMonthKey(mk) {
 }
 
 function compareMonthKey(a, b) {
-  // lexical works for YYYY-MM
   return String(a).localeCompare(String(b));
 }
 
 function listMonthKeysBetween(startKey, endKey) {
-  // Inclusive list from startKey to endKey (YYYY-MM)
   const s = parseMonthKey(startKey);
   const e = parseMonthKey(endKey);
   if (!s || !e) return [];
 
   const start = new Date(Date.UTC(s.year, Number(s.month) - 1, 1));
   const end = new Date(Date.UTC(e.year, Number(e.month) - 1, 1));
-
   if (start > end) return [];
 
   const out = [];
@@ -200,17 +196,20 @@ async function verifyPassword(pw) {
 // App state
 // -------------------------
 const state = {
-  // Time selection state:
-  // - visibleMonths is the concrete list of YYYY-MM keys currently shown (the single source of truth)
+  // concrete list of YYYY-MM keys currently shown
   visibleMonths: [],
 
-  // UI form values (custom range)
+  // current selected custom range keys
   rangeStartKey: null,
   rangeEndKey: null,
 
+  // overall min/max months found in Xano data (for dropdown bounds)
+  minMonthKey: null,
+  maxMonthKey: null,
+
   selectedCompanies: new Set(),
   rows: [],              // normalized rows
-  latestMonthKey: null   // YYYY-MM from data
+  latestMonthKey: null   // YYYY-MM latest month in Xano data
 };
 
 // -------------------------
@@ -220,8 +219,16 @@ function computeLatestMonthKey(rows) {
   const keys = rows
     .map(r => monthKeyFromYearMonthName(r.year, r.month))
     .filter(Boolean)
-    .sort(); // ascending YYYY-MM
+    .sort();
   return keys[keys.length - 1] || null;
+}
+
+function computeMinMaxMonthKey(rows) {
+  const keys = rows
+    .map(r => monthKeyFromYearMonthName(r.year, r.month))
+    .filter(Boolean)
+    .sort();
+  return { min: keys[0] || null, max: keys[keys.length - 1] || null };
 }
 
 function uniqueCompanies(rows) {
@@ -273,20 +280,17 @@ function findRowByCompanyAndMonth(companyName, monthKey) {
 function normalizeRow(row) {
   const r = { ...row };
 
-  // --- Agency fee object -> numeric fields
   const feeObj = r.agency_fee_one_child;
   if (feeObj && typeof feeObj === "object") {
     r.agency_fee_one_child_weekly = toNumberOrNull(feeObj.Weekly ?? feeObj.weekly);
     r.agency_fee_one_child_yearly = toNumberOrNull(feeObj.Yearly ?? feeObj.yearly);
   }
 
-  // --- Monthly Instagram posts object -> numeric field
   const postsObj = r.number_of_monthly_instagram_posts;
   if (postsObj && typeof postsObj === "object") {
     const total = toNumberOrNull(postsObj.total) ?? toNumberOrNull(postsObj.total_posts);
-    if (total !== null) {
-      r.number_of_monthly_instagram_posts = total;
-    } else {
+    if (total !== null) r.number_of_monthly_instagram_posts = total;
+    else {
       r.number_of_monthly_instagram_posts = Object.values(postsObj)
         .map(toNumberOrNull)
         .filter(v => v !== null)
@@ -294,13 +298,11 @@ function normalizeRow(row) {
     }
   }
 
-  // --- Monthly Instagram engagement object -> numeric field
   const engObj = r.monthly_instagram_engagement;
   if (engObj && typeof engObj === "object") {
     const total = toNumberOrNull(engObj.total_engagement) ?? toNumberOrNull(engObj.total);
-    if (total !== null) {
-      r.monthly_instagram_engagement = total;
-    } else {
+    if (total !== null) r.monthly_instagram_engagement = total;
+    else {
       r.monthly_instagram_engagement = Object.values(engObj)
         .map(toNumberOrNull)
         .filter(v => v !== null)
@@ -521,7 +523,7 @@ function refresh() {
   const selected = allCompanies.filter(c => state.selectedCompanies.has(c));
 
   document.getElementById("lastUpdated").textContent =
-    `Loaded from Xano. Latest month: ${state.latestMonthKey}. Viewing: ${visibleMonths.join(", ")}.`;
+    `Loaded from Xano. Latest month in Xano: ${state.latestMonthKey}. Viewing: ${visibleMonths.join(", ")}.`;
 
   if (!selected.length) {
     mount.appendChild(el("p", { className: "muted", text: "No companies selected." }));
@@ -640,13 +642,11 @@ function applyCustomRangeFromSelectors() {
   const startKey = monthKeyFromYYYYMMParts(sy, sm);
   const endKey = monthKeyFromYYYYMMParts(ey, em);
 
-  // If reversed, block
   if (compareMonthKey(startKey, endKey) > 0) {
     alert("Start month must be before (or the same as) End month.");
     return;
   }
 
-  // turn off quick ticks because user chose a custom range
   document.getElementById("quickThisMonth").checked = false;
   document.getElementById("quickLastMonth").checked = false;
 
@@ -657,25 +657,47 @@ function applyCustomRangeFromSelectors() {
   refresh();
 }
 
+// IMPORTANT CHANGE YOU REQUESTED:
+// "This month" and "Last month" are based on the *current real month* (today),
+// NOT the latest month in Xano.
+//
+// Today is 2026-03-11, so:
+// - This Month => 2026-03
+// - Last Month => 2026-02
+function currentMonthKeyUTC() {
+  const now = new Date();
+  const yyyy = now.getUTCFullYear();
+  const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
+  return `${yyyy}-${mm}`;
+}
+
+function previousMonthKeyUTC(monthKey) {
+  const p = parseMonthKey(monthKey);
+  if (!p) return null;
+  const dt = new Date(Date.UTC(p.year, Number(p.month) - 1, 1));
+  dt.setUTCMonth(dt.getUTCMonth() - 1);
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
 function setQuickThisMonth() {
   document.getElementById("quickLastMonth").checked = false;
 
-  state.rangeStartKey = state.latestMonthKey;
-  state.rangeEndKey = state.latestMonthKey;
-  state.visibleMonths = [state.latestMonthKey];
+  const key = currentMonthKeyUTC();
 
-  setRangeSelectorsFromKeys(state.latestMonthKey, state.latestMonthKey);
+  // If the month doesn't exist in Xano data, show empty table but keep range.
+  state.rangeStartKey = key;
+  state.rangeEndKey = key;
+  state.visibleMonths = [key];
+
+  setRangeSelectorsFromKeys(key, key);
   refresh();
 }
 
 function setQuickLastMonth() {
   document.getElementById("quickThisMonth").checked = false;
 
-  const { year, month } = parseMonthKey(state.latestMonthKey);
-  const dt = new Date(Date.UTC(year, Number(month) - 1, 1));
-  dt.setUTCMonth(dt.getUTCMonth() - 1);
-
-  const lastKey = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}`;
+  const thisKey = currentMonthKeyUTC();
+  const lastKey = previousMonthKeyUTC(thisKey);
 
   state.rangeStartKey = lastKey;
   state.rangeEndKey = lastKey;
@@ -693,11 +715,15 @@ async function reloadFromXanoAndRefresh() {
   const raw = Array.isArray(rows) ? rows : (rows?.items || rows?.data || []);
 
   state.rows = raw.map(normalizeRow);
+
+  // Compute bounds from ALL data in Xano
   state.latestMonthKey = computeLatestMonthKey(state.rows);
+  const { min, max } = computeMinMaxMonthKey(state.rows);
+  state.minMonthKey = min;
+  state.maxMonthKey = max;
 
   const companies = uniqueCompanies(state.rows);
 
-  // default: all companies selected first load
   if (state.selectedCompanies.size === 0) {
     companies.forEach(c => state.selectedCompanies.add(c));
   } else {
@@ -709,11 +735,20 @@ async function reloadFromXanoAndRefresh() {
   renderCompanyToggles(companies);
   renderDatasetToggles();
 
-  // If no visible months chosen yet, default to latest month.
-  if (!state.visibleMonths.length && state.latestMonthKey) {
-    state.visibleMonths = [state.latestMonthKey];
-    state.rangeStartKey = state.latestMonthKey;
-    state.rangeEndKey = state.latestMonthKey;
+  // Default visible months (on first load):
+  // Prefer "this month" from real clock, but if it's outside dataset, fall back to latest in Xano.
+  if (!state.visibleMonths.length) {
+    const thisKey = currentMonthKeyUTC();
+    const okWithinDataset =
+      state.minMonthKey && state.maxMonthKey &&
+      compareMonthKey(thisKey, state.minMonthKey) >= 0 &&
+      compareMonthKey(thisKey, state.maxMonthKey) <= 0;
+
+    const defaultKey = okWithinDataset ? thisKey : state.latestMonthKey;
+
+    state.visibleMonths = [defaultKey];
+    state.rangeStartKey = defaultKey;
+    state.rangeEndKey = defaultKey;
   }
 
   refresh();
@@ -746,13 +781,11 @@ async function attemptUnlock(password) {
 async function init() {
   wireEditMetricModal();
 
-  // Wire exports
   document.getElementById("exportCsv").addEventListener("click", exportVisibleToCsv);
   document.getElementById("exportXlsx").addEventListener("click", () => {
     alert("Excel export can be added next. CSV export is enabled now.");
   });
 
-  // Company bulk actions
   document.getElementById("companiesAllOn").addEventListener("click", () => {
     uniqueCompanies(state.rows).forEach(c => state.selectedCompanies.add(c));
     renderCompanyToggles(uniqueCompanies(state.rows));
@@ -765,13 +798,11 @@ async function init() {
     refresh();
   });
 
-  // Lock
   document.getElementById("lockBtn").addEventListener("click", () => {
     clearEditKey();
     setLockedUI(true);
   });
 
-  // Unlock
   document.getElementById("unlockBtn").addEventListener("click", async () => {
     const pw = document.getElementById("pagePassword").value;
     const errMount = document.getElementById("lockError");
@@ -781,21 +812,20 @@ async function init() {
       await attemptUnlock(pw);
       setLockedUI(false);
 
-      // Once unlocked, initialize time-range controls based on data
-      const minYear = Math.min(...state.visibleMonths.map(m => Number(m.split("-")[0])));
-      const maxYear = Math.max(...state.visibleMonths.map(m => Number(m.split("-")[0])), Number(state.latestMonthKey.split("-")[0]));
+      if (!state.minMonthKey || !state.maxMonthKey) return;
 
-      fillYearSelect(document.getElementById("startYear"), minYear, maxYear);
-      fillYearSelect(document.getElementById("endYear"), minYear, maxYear);
+      const minY = Number(state.minMonthKey.split("-")[0]);
+      const maxY = Number(state.maxMonthKey.split("-")[0]);
+
+      fillYearSelect(document.getElementById("startYear"), minY, maxY);
+      fillYearSelect(document.getElementById("endYear"), minY, maxY);
       fillMonthSelect(document.getElementById("startMonth"));
       fillMonthSelect(document.getElementById("endMonth"));
 
       setRangeSelectorsFromKeys(state.rangeStartKey, state.rangeEndKey);
 
-      // Apply custom range button
       document.getElementById("applyRange").addEventListener("click", applyCustomRangeFromSelectors);
 
-      // Quick ticks
       document.getElementById("quickThisMonth").addEventListener("change", (e) => {
         if (e.target.checked) setQuickThisMonth();
       });
@@ -809,7 +839,6 @@ async function init() {
     }
   });
 
-  // Default to locked
   setLockedUI(true);
 }
 
