@@ -174,6 +174,7 @@
       border: 1px solid #d0d0d0;
       border-radius: 8px;
       background: #fff;
+      color: #111; /* ensure visible */
     }
 
     /* Download buttons */
@@ -188,8 +189,17 @@
       padding: 6px 10px;
       border: 1px solid #d0d0d0;
       border-radius: 8px;
-      background: #fff;
+
+      /* Force readable button text regardless of global CSS */
+      background: #ffffff;
+      color: #111111;
+      font-weight: 600;
+      line-height: 1.2;
+
       cursor: pointer;
+    }
+    .chart-downloads button:hover {
+      background: #f3f4f6;
     }
 
     canvas { max-width: 100%; }
