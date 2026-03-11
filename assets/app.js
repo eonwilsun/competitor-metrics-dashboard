@@ -8,20 +8,25 @@ const EDIT_KEY_NAME = "EDIT_KEY";
 const SESSION_KEY = "cmd.editKey.v1";
 
 // -------------------------
-// Metrics
+// Metrics (table columns)
 // -------------------------
 const METRIC_FIELDS = [
   { key: "domain_authority", label: "Authority Score", format: "int" },
   { key: "number_of_referring_domains", label: "Referring Domains", format: "int" },
   { key: "number_of_organic_keywords", label: "Organic Keywords", format: "int" },
   { key: "organic_traffic", label: "Organic Traffic (est.)", format: "int" },
+
   { key: "instagram_followers", label: "Instagram Followers", format: "int" },
 
-  // NOTE: These are display fields, but we now PATCH their underlying object totals
-  { key: "number_of_monthly_instagram_posts_display", label: "Posts / month", format: "richtext" },
-  { key: "monthly_instagram_engagement_display", label: "Engagements / month", format: "richtext" },
+  // Posts / month: Images & Reels editable, Total derived
+  { key: "posts_images", label: "Posts / month — Images", format: "int" },
+  { key: "posts_reels", label: "Posts / month — Reels", format: "int" },
+  { key: "posts_total", label: "Posts / month — Total", format: "int", readOnly: true },
 
-  // NOTE: These are derived from agency_fee_one_child object, but we now PATCH the object keys
+  // Engagement: both editable
+  { key: "engagement_total", label: "Engagements / month — Total", format: "int" },
+  { key: "engagement_rate_percentage", label: "Engagement rate %", format: "float" },
+
   { key: "agency_fee_one_child_weekly", label: "Agency Fee (1 child) / week", format: "int" },
   { key: "agency_fee_one_child_yearly", label: "Agency Fee (1 child) / year", format: "int" },
 
@@ -32,12 +37,15 @@ const METRIC_FIELDS = [
 
 const NOTES_FIELD_KEY = "notes";
 
+// -------------------------
+// Chart metrics
+// -------------------------
 const CHART_METRICS = [
   { key: "domain_authority", label: "Authority Score" },
   { key: "number_of_referring_domains", label: "Referring Domains" },
   { key: "number_of_organic_keywords", label: "Organic Keywords" },
   { key: "organic_traffic", label: "Organic Traffic (est.)" },
-  { key: "instagram_followers", label: "Followers" },
+  { key: "instagram_followers", label: "Instagram Followers" },
   { key: "agency_fee_one_child_weekly", label: "Agency Fee / week" },
   { key: "agency_fee_one_child_yearly", label: "Agency Fee / year" },
   { key: "meta_ads_running", label: "Meta Ads Running" },
@@ -113,19 +121,22 @@ function normalizeText(v) {
   return s.length ? s : null;
 }
 
-function formatPercent(v) {
-  const n = toNumberOrNull(v);
-  if (n === null) return null;
-  return `${String(n)}%`;
-}
-
 function formatValue(v, format) {
   if (v === null || v === undefined || v === "") return "—";
+
   if (format === "int") {
     const n = Number(v);
-    if (Number.isNaN(n)) return "—";
-    return n.toLocaleString();
+    if (!Number.isFinite(n)) return "—";
+    return Math.round(n).toLocaleString();
   }
+
+  if (format === "float") {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return "—";
+    const fixed = n.toFixed(2);
+    return fixed.replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
+  }
+
   return String(v);
 }
 
@@ -149,67 +160,44 @@ function linkifyTextToHtml(text) {
 }
 
 // -------------------------
-// Instagram breakdown + totals
+// Object helpers (posts + engagement)
 // -------------------------
-function pickNumberFromObject(obj, keys) {
-  for (const k of keys) {
-    if (Object.prototype.hasOwnProperty.call(obj, k)) {
-      const n = toNumberOrNull(obj[k]);
-      if (n !== null) return n;
-    }
-  }
-  return null;
+function getObj(root) {
+  return root && typeof root === "object" ? root : {};
 }
 
-function formatPostsBreakdown(obj) {
-  if (!obj || typeof obj !== "object") return null;
-
-  const images = pickNumberFromObject(obj, [
-    "image_graphic", "Image Graphic", "imageGraphic",
-    "graphic_image", "Graphic Image", "graphic", "Graphic",
-    "Image", "image", "Images", "images"
-  ]);
-
-  const reels = pickNumberFromObject(obj, [
-    "reels_video", "Reels Video", "reelsVideo", "Reels", "reels"
-  ]);
-
-  const total = pickNumberFromObject(obj, [
-    "number_of_monthly_instagram_posts_total", "Total", "total", "total_posts"
-  ]);
-
-  const parts = [];
-  if (images !== null) parts.push(`Images: ${images.toLocaleString()}`);
-  if (reels !== null) parts.push(`Reels: ${reels.toLocaleString()}`);
-  if (total !== null) parts.push(`Total: ${total.toLocaleString()}`);
-  return parts.length ? parts.join(", ") : null;
+function readPostsImages(row) {
+  return toNumberOrNull(getObj(row?.number_of_monthly_instagram_posts).image_graphic);
+}
+function readPostsReels(row) {
+  return toNumberOrNull(getObj(row?.number_of_monthly_instagram_posts).reels_video);
+}
+function readPostsTotal(row) {
+  return toNumberOrNull(getObj(row?.number_of_monthly_instagram_posts).number_of_monthly_instagram_posts_total);
 }
 
-function formatEngagementBreakdown(obj) {
-  if (!obj || typeof obj !== "object") return null;
-
-  const rate = obj.engagement_rate_percentage ?? obj.engagementRatePercentage ?? obj.engagement_rate;
-  const total = obj.Total ?? obj.total ?? obj.total_engagement ?? obj.totalEngagement;
-
-  const rateStr = formatPercent(rate);
-  const totalNum = toNumberOrNull(total);
-
-  const parts = [];
-  if (rateStr) parts.push(`${rateStr} engagement rate`);
-  if (totalNum !== null) parts.push(`total: ${totalNum.toLocaleString()}`);
-  return parts.length ? parts.join(", ") : null;
+function derivePostsTotal(images, reels) {
+  return (toNumberOrNull(images) ?? 0) + (toNumberOrNull(reels) ?? 0);
 }
 
+function readEngagementTotal(row) {
+  return toNumberOrNull(getObj(row?.monthly_instagram_engagement).total_engagement);
+}
+function readEngagementRate(row) {
+  return toNumberOrNull(getObj(row?.monthly_instagram_engagement).engagement_rate_percentage);
+}
+
+// -------------------------
+// Extract totals for charts/averages
+// -------------------------
 function extractPostsTotal(obj) {
   if (!obj || typeof obj !== "object") return toNumberOrNull(obj);
-  return pickNumberFromObject(obj, [
-    "number_of_monthly_instagram_posts_total", "Total", "total", "total_posts"
-  ]);
+  return toNumberOrNull(obj.number_of_monthly_instagram_posts_total ?? obj.Total ?? obj.total ?? obj.total_posts);
 }
 
 function extractEngagementTotal(obj) {
   if (!obj || typeof obj !== "object") return toNumberOrNull(obj);
-  return toNumberOrNull(obj.Total ?? obj.total ?? obj.total_engagement ?? obj.totalEngagement);
+  return toNumberOrNull(obj.total_engagement ?? obj.Total ?? obj.total ?? obj.totalEngagement);
 }
 
 // -------------------------
@@ -306,7 +294,6 @@ async function xanoFetch(path, { method = "GET", body = null, withEditKey = true
   return await res.json();
 }
 
-// password check (still used for unlock)
 async function fetchEditKeyFromXano() {
   const res = await xanoFetch(XANO_CONFIG_PATH, { method: "GET", withEditKey: false });
   const rows = Array.isArray(res) ? res : (res?.items || res?.data || []);
@@ -388,63 +375,72 @@ function normalizeRow(row) {
     r.agency_fee_one_child_yearly = toNumberOrNull(feeObj.Yearly ?? feeObj.yearly);
   }
 
+  // posts virtual columns (derive total for UI)
+  r.posts_images = readPostsImages(r) ?? 0;
+  r.posts_reels = readPostsReels(r) ?? 0;
+  r.posts_total = derivePostsTotal(r.posts_images, r.posts_reels);
+
+  // engagement virtual columns
+  r.engagement_total = readEngagementTotal(r);
+  r.engagement_rate_percentage = readEngagementRate(r);
+
   r.monthly_press_coverage = normalizeText(r.monthly_press_coverage);
-
-  r.number_of_monthly_instagram_posts_display =
-    formatPostsBreakdown(r.number_of_monthly_instagram_posts) ??
-    (toNumberOrNull(r.number_of_monthly_instagram_posts) !== null
-      ? Number(r.number_of_monthly_instagram_posts).toLocaleString()
-      : null);
-
-  r.monthly_instagram_engagement_display =
-    formatEngagementBreakdown(r.monthly_instagram_engagement) ??
-    (toNumberOrNull(r.monthly_instagram_engagement) !== null
-      ? Number(r.monthly_instagram_engagement).toLocaleString()
-      : null);
 
   return r;
 }
 
 function getRowId(row) {
-  // support either convention
   const id = row?.id ?? row?.competitor_metrics_dashboard_id;
   return (id === null || id === undefined || id === "") ? null : id;
 }
 
 // -------------------------
-// PATCH helpers for nested object-backed fields
+// Build PATCH bodies for virtual fields
 // -------------------------
+function buildPatchBodyForMetric(row, fieldKey, rawNum) {
+  const num = Number(rawNum);
 
-// Map "UI field keys" -> which object + subkey should be updated in Xano.
-// These are the fields that currently "don't update" because they are objects in Xano.
-const PATCH_PATHS_BY_FIELD_KEY = {
-  // Agency fee fields are derived from agency_fee_one_child object
-  agency_fee_one_child_weekly: { root: "agency_fee_one_child", child: "Weekly" },
-  agency_fee_one_child_yearly: { root: "agency_fee_one_child", child: "Yearly" },
+  // Agency fee virtual fields -> patch agency_fee_one_child object
+  if (fieldKey === "agency_fee_one_child_weekly" || fieldKey === "agency_fee_one_child_yearly") {
+    const rootKey = "agency_fee_one_child";
+    const childKey = fieldKey === "agency_fee_one_child_weekly" ? "Weekly" : "Yearly";
+    const current = (row && typeof row[rootKey] === "object" && row[rootKey]) ? row[rootKey] : {};
+    return { [rootKey]: { ...current, [childKey]: Math.round(num) } };
+  }
 
-  // Display fields: patch the underlying object totals (not the display string)
-  number_of_monthly_instagram_posts_display: {
-    root: "number_of_monthly_instagram_posts",
-    child: "number_of_monthly_instagram_posts_total"
-  },
-  monthly_instagram_engagement_display: { root: "monthly_instagram_engagement", child: "total_engagement" }
-};
+  // Posts: images/reels editable; always update total automatically in Xano.
+  if (fieldKey === "posts_images" || fieldKey === "posts_reels") {
+    const rootKey = "number_of_monthly_instagram_posts";
+    const current = (row && typeof row[rootKey] === "object" && row[rootKey]) ? row[rootKey] : {};
+    const next = { ...current };
 
-function buildPatchBodyForMetric(row, fieldKey, num) {
-  const map = PATCH_PATHS_BY_FIELD_KEY[fieldKey];
-  if (!map) return { [fieldKey]: num };
+    if (fieldKey === "posts_images") next.image_graphic = Math.round(num);
+    if (fieldKey === "posts_reels") next.reels_video = Math.round(num);
 
-  const currentRoot =
-    row && row[map.root] && typeof row[map.root] === "object"
-      ? row[map.root]
-      : {};
+    const images = toNumberOrNull(next.image_graphic) ?? 0;
+    const reels = toNumberOrNull(next.reels_video) ?? 0;
+    next.number_of_monthly_instagram_posts_total = images + reels;
 
-  return {
-    [map.root]: {
-      ...currentRoot,
-      [map.child]: num
-    }
-  };
+    return { [rootKey]: next };
+  }
+
+  // Total is derived -> do not allow PATCH
+  if (fieldKey === "posts_total") return null;
+
+  // Engagement: editable total + rate
+  if (fieldKey === "engagement_total" || fieldKey === "engagement_rate_percentage") {
+    const rootKey = "monthly_instagram_engagement";
+    const current = (row && typeof row[rootKey] === "object" && row[rootKey]) ? row[rootKey] : {};
+    const next = { ...current };
+
+    if (fieldKey === "engagement_total") next.total_engagement = Math.round(num);
+    if (fieldKey === "engagement_rate_percentage") next.engagement_rate_percentage = num;
+
+    return { [rootKey]: next };
+  }
+
+  // Default: patch top-level numeric fields
+  return { [fieldKey]: Math.round(num) };
 }
 
 // -------------------------
@@ -520,7 +516,6 @@ function closeEditTextModal() {
 }
 
 function wireEditModals() {
-  // close buttons/backdrops
   document.getElementById("editMetricClose").addEventListener("click", closeEditMetricModal);
   document.getElementById("editMetricModalBackdrop").addEventListener("click", (e) => {
     if (e.target.id === "editMetricModalBackdrop") closeEditMetricModal();
@@ -531,7 +526,6 @@ function wireEditModals() {
     if (e.target.id === "editTextModalBackdrop") closeEditTextModal();
   });
 
-  // Enter saves number modal
   document.getElementById("editMetricNewValue").addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -539,7 +533,6 @@ function wireEditModals() {
     }
   });
 
-  // Ctrl+Enter saves text modal (keeps Enter for newline)
   document.getElementById("editTextNewValue").addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
@@ -547,7 +540,6 @@ function wireEditModals() {
     }
   });
 
-  // update number modal
   document.getElementById("editMetricUpdate").addEventListener("click", async () => {
     if (!editModalState) return;
 
@@ -557,7 +549,7 @@ function wireEditModals() {
     if (raw === "" || raw === null || raw === undefined) return alert("Enter a value.");
 
     const num = Number(raw);
-    if (Number.isNaN(num)) return alert("Please enter a valid number.");
+    if (!Number.isFinite(num)) return alert("Please enter a valid number.");
 
     const { row, fieldKey } = editModalState;
     const rowId = getRowId(row);
@@ -568,6 +560,10 @@ function wireEditModals() {
       btn.textContent = "Saving...";
 
       const body = buildPatchBodyForMetric(row, fieldKey, num);
+      if (!body) {
+        alert("Total is derived. Edit Images or Reels.");
+        return;
+      }
 
       await xanoFetch(`${XANO_TABLE_PATH}/${rowId}`, {
         method: "PATCH",
@@ -585,7 +581,6 @@ function wireEditModals() {
     }
   });
 
-  // update text modal (press/notes)
   document.getElementById("editTextUpdate").addEventListener("click", async () => {
     const mode = document.getElementById("editTextUpdate").dataset.mode || "";
     const btn = document.getElementById("editTextUpdate");
@@ -635,7 +630,6 @@ function wireEditModals() {
     }
   });
 
-  // Esc closes
   window.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
     if (editModalState) closeEditMetricModal();
@@ -695,7 +689,7 @@ function buildMetricsTable(visibleMonths, companies) {
         editTargetRow = findRowByCompanyAndMonth(companyName, editMonthKey);
         displayValue = editTargetRow ? editTargetRow[f.key] : null;
       } else {
-        if (f.format === "int") displayValue = averageNumericForCompanyAcrossMonths(companyName, visibleMonths, f.key);
+        if (f.format === "int" || f.format === "float") displayValue = averageNumericForCompanyAcrossMonths(companyName, visibleMonths, f.key);
         else displayValue = null;
       }
 
@@ -709,7 +703,6 @@ function buildMetricsTable(visibleMonths, companies) {
           title: singleMonth ? "Click to edit" : "Shown only in single-month view"
         });
 
-        // Only monthly_press_coverage is editable richtext.
         if (singleMonth && editTargetRow && f.editable) {
           div.addEventListener("click", (e) => {
             if (e.target && e.target.closest && e.target.closest("a")) return;
@@ -732,10 +725,10 @@ function buildMetricsTable(visibleMonths, companies) {
       const span = el("span", {
         className: `clickable-metric metrics-num${isEmpty ? " muted-cell" : ""}`,
         text: formatValue(displayValue, f.format),
-        title: singleMonth ? "Click to edit" : "Averaged across selected months"
+        title: singleMonth ? (f.readOnly ? "Derived (edit Images/Reels)" : "Click to edit") : "Averaged across selected months"
       });
 
-      if (singleMonth && editTargetRow) {
+      if (singleMonth && editTargetRow && !f.readOnly) {
         span.addEventListener("click", () => {
           openEditMetricModal({
             row: editTargetRow,
@@ -1090,7 +1083,6 @@ async function init() {
   const chartSelect = document.getElementById("chartMetricSelect");
   if (chartSelect) chartSelect.addEventListener("change", renderChart);
 
-  // Enter = Unlock
   document.getElementById("pagePassword").addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
