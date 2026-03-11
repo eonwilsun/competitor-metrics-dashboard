@@ -127,14 +127,24 @@
       box-sizing: border-box;
       width: 100%;
     }
+
+    /* Metrics clickable values (we remove underline via JS too, but do it here as well) */
     .clickable-metric {
       cursor: pointer;
-      text-decoration: underline;
+      text-decoration: none; /* remove underlines */
       text-underline-offset: 2px;
     }
     .clickable-metric.muted-cell {
       text-decoration: none;
       opacity: 0.85;
+    }
+
+    /* Make all links (press coverage / notes) not underlined unless hovered */
+    #metricsDisplay a {
+      text-decoration: none;
+    }
+    #metricsDisplay a:hover {
+      text-decoration: underline;
     }
 
     /* Charts */
@@ -299,7 +309,7 @@
     </div>
   </div>
 
-  <!-- Edit Text Modal (Monthly Press Coverage) -->
+  <!-- Shared Edit Text Modal (Press Coverage + Notes) -->
   <div id="editTextModalBackdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-hidden="true">
     <div class="modal">
       <div class="modal-header">
