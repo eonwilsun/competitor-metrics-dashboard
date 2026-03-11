@@ -107,6 +107,7 @@ function formatPostsBreakdown(obj) {
   const total = toNumberOrNull(obj.Total ?? obj.total ?? obj.number_of_monthly_instagram_posts_total ?? obj.total_posts);
 
   const parts = [];
+  // show Images even if it is 0 (but not if missing)
   if (images !== null) parts.push(`Images: ${images.toLocaleString()}`);
   if (reels !== null) parts.push(`Reels: ${reels.toLocaleString()}`);
   if (total !== null) parts.push(`Total: ${total.toLocaleString()}`);
@@ -309,14 +310,14 @@ function findRowByCompanyAndMonth(companyName, monthKey) {
 function normalizeRow(row) {
   const r = { ...row };
 
-  // Agency fee object -> numeric fields (RESTORED)
+  // Agency fee object -> numeric fields
   const feeObj = r.agency_fee_one_child;
   if (feeObj && typeof feeObj === "object") {
     r.agency_fee_one_child_weekly = toNumberOrNull(feeObj.Weekly ?? feeObj.weekly);
     r.agency_fee_one_child_yearly = toNumberOrNull(feeObj.Yearly ?? feeObj.yearly);
   }
 
-  // Press coverage text (RESTORED)
+  // Press coverage text
   r.monthly_press_coverage = normalizeText(r.monthly_press_coverage);
 
   // Instagram display strings
@@ -442,7 +443,7 @@ function wireEditModals() {
 }
 
 // -------------------------
-// Rendering helpers for multi-month numeric averaging
+// Multi-month numeric averaging
 // -------------------------
 function averageNumericForCompanyAcrossMonths(companyName, monthKeys, fieldKey) {
   const vals = monthKeys
@@ -493,9 +494,6 @@ function buildMetricsTable(visibleMonths, companies) {
         editTargetRow = findRowByCompanyAndMonth(companyName, editMonthKey);
         displayValue = editTargetRow ? editTargetRow[f.key] : null;
       } else {
-        // Multi-month:
-        // - for numeric fields: average
-        // - for richtext fields: show "—"
         if (f.format === "int") {
           displayValue = averageNumericForCompanyAcrossMonths(companyName, visibleMonths, f.key);
         } else {
@@ -505,7 +503,6 @@ function buildMetricsTable(visibleMonths, companies) {
 
       const td = el("td");
 
-      // richtext cell (press coverage + instagram display fields)
       if (f.format === "richtext") {
         const html = displayValue ? linkifyTextToHtml(displayValue) : "—";
         const div = el("div", {
@@ -514,7 +511,6 @@ function buildMetricsTable(visibleMonths, companies) {
           title: singleMonth ? "Click to edit (if enabled)" : "Shown only in single-month view"
         });
 
-        // Only monthly_press_coverage is editable richtext
         if (singleMonth && editTargetRow && f.editable) {
           div.addEventListener("click", () => {
             openEditTextModal({
@@ -532,7 +528,6 @@ function buildMetricsTable(visibleMonths, companies) {
         continue;
       }
 
-      // int cell
       const isEmpty = displayValue === null || displayValue === undefined || displayValue === "";
       const span = el("span", {
         className: `clickable-metric${isEmpty ? " muted-cell" : ""}`,
@@ -540,9 +535,7 @@ function buildMetricsTable(visibleMonths, companies) {
         title: singleMonth ? "Click to edit" : "Averaged across selected months"
       });
 
-      const isDerivedDisplay = f.key.endsWith("_display");
-
-      if (singleMonth && editTargetRow && !isDerivedDisplay) {
+      if (singleMonth && editTargetRow) {
         span.addEventListener("click", () => {
           openEditMetricModal({
             row: editTargetRow,
@@ -558,7 +551,7 @@ function buildMetricsTable(visibleMonths, companies) {
       tr.appendChild(td);
     }
 
-    // Notes cell (RESTORED)
+    // Notes cell
     const notesTd = el("td");
     const notesWrap = el("div", { style: "display:flex; gap:8px; align-items:flex-start;" });
 
@@ -609,11 +602,141 @@ function buildMetricsTable(visibleMonths, companies) {
 }
 
 // -------------------------
-// Chart (unchanged here; if you already have it working, keep your version)
+// Chart.js integration (FIXED so you can pick a metric)
+// Requires Chart.js in index.html
 // -------------------------
-function refreshChartSafe() {
-  // If you have the Chart.js chart version in your index.html/app.js already, leave it.
-  // Keeping this as a no-op to avoid breaking your current chart work.
+let metricChart = null;
+
+function companyColor(company) {
+  if (String(company).toLowerCase() === "swiis") return "#f59e0b"; // orange for Swiis
+  let hash = 0;
+  const s = String(company);
+  for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
+  const hue = hash % 360;
+  return `hsl(${hue}, 70%, 45%)`;
+}
+
+function chartableMetrics() {
+  return [
+    { key: "domain_authority", label: "Authority Score" },
+    { key: "number_of_referring_domains", label: "Referring Domains" },
+    { key: "number_of_organic_keywords", label: "Organic Keywords" },
+    { key: "organic_traffic", label: "Organic Traffic (est.)" },
+    { key: "instagram_followers", label: "Followers" },
+    { key: "agency_fee_one_child_weekly", label: "Agency Fee / week" },
+    { key: "agency_fee_one_child_yearly", label: "Agency Fee / year" },
+    { key: "meta_ads_running", label: "Meta Ads Running" },
+    { key: "number_of_monthly_instagram_posts", label: "Posts / month (Total)" },
+    { key: "monthly_instagram_engagement", label: "Engagements / month (Total)" }
+  ];
+}
+
+function getNumericMetricValue(row, metricKey) {
+  if (!row) return null;
+
+  if (metricKey === "number_of_monthly_instagram_posts") return extractPostsTotal(row.number_of_monthly_instagram_posts);
+  if (metricKey === "monthly_instagram_engagement") return extractEngagementTotal(row.monthly_instagram_engagement);
+
+  return toNumberOrNull(row[metricKey]);
+}
+
+function ensureChartMetricOptions() {
+  const sel = document.getElementById("chartMetricSelect");
+  if (!sel) return;
+
+  const opts = chartableMetrics();
+
+  // If options already exist, don't wipe selection on every refresh
+  if (sel.options.length === 0) {
+    for (const o of opts) {
+      const opt = document.createElement("option");
+      opt.value = o.key;
+      opt.textContent = o.label;
+      sel.appendChild(opt);
+    }
+    // default selection
+    if (opts.length) sel.value = opts[0].key;
+  }
+}
+
+function destroyChart() {
+  if (metricChart) {
+    metricChart.destroy();
+    metricChart = null;
+  }
+}
+
+function renderChart() {
+  const canvas = document.getElementById("metricChart");
+  const sel = document.getElementById("chartMetricSelect");
+  const modeLabel = document.getElementById("chartModeLabel");
+  if (!canvas || !sel || typeof Chart === "undefined") return;
+
+  const metricKey = sel.value;
+  if (!metricKey) return;
+
+  const metricLabel = chartableMetrics().find(m => m.key === metricKey)?.label || metricKey;
+
+  const visibleMonths = state.visibleMonths.length ? state.visibleMonths : (state.latestMonthKey ? [state.latestMonthKey] : []);
+  if (!visibleMonths.length) return;
+
+  const singleMonth = visibleMonths.length === 1;
+
+  const allCompanies = uniqueCompanies(state.rows);
+  const companies = allCompanies.filter(c => state.selectedCompanies.has(c));
+
+  if (modeLabel) {
+    modeLabel.textContent = singleMonth
+      ? `(Bar • ${visibleMonths[0]})`
+      : `(Line • ${visibleMonths[0]} → ${visibleMonths[visibleMonths.length - 1]})`;
+  }
+
+  destroyChart();
+
+  if (singleMonth) {
+    const mk = visibleMonths[0];
+    const values = companies.map(c => getNumericMetricValue(findRowByCompanyAndMonth(c, mk), metricKey) ?? 0);
+    const colors = companies.map(companyColor);
+
+    metricChart = new Chart(canvas, {
+      type: "bar",
+      data: {
+        labels: companies,
+        datasets: [{
+          label: metricLabel,
+          data: values,
+          backgroundColor: colors
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: true } },
+        scales: { y: { beginAtZero: true } }
+      }
+    });
+  } else {
+    const datasets = companies.map((c) => {
+      const data = visibleMonths.map(mk => getNumericMetricValue(findRowByCompanyAndMonth(c, mk), metricKey) ?? 0);
+      const color = companyColor(c);
+      return {
+        label: c,
+        data,
+        tension: 0.25,
+        borderColor: color,
+        backgroundColor: color
+      };
+    });
+
+    metricChart = new Chart(canvas, {
+      type: "line",
+      data: { labels: visibleMonths, datasets },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: true } },
+        scales: { y: { beginAtZero: true } }
+      }
+    });
+  }
 }
 
 // -------------------------
@@ -625,6 +748,7 @@ function refresh() {
 
   if (!state.latestMonthKey) {
     mount.appendChild(el("p", { className: "muted", text: "No data found in Xano." }));
+    destroyChart();
     return;
   }
 
@@ -637,11 +761,15 @@ function refresh() {
 
   if (!selected.length) {
     mount.appendChild(el("p", { className: "muted", text: "No companies selected." }));
+    destroyChart();
     return;
   }
 
   mount.appendChild(buildMetricsTable(visibleMonths, selected));
-  refreshChartSafe();
+
+  // Chart: make sure dropdown has options and render
+  ensureChartMetricOptions();
+  renderChart();
 }
 
 async function reloadFromXanoAndRefresh() {
@@ -763,6 +891,14 @@ function setQuickLastMonth() {
 
 async function init() {
   wireEditModals();
+
+  // Chart dropdown must be interactive: render on change
+  const chartSelect = document.getElementById("chartMetricSelect");
+  if (chartSelect) {
+    chartSelect.addEventListener("change", () => {
+      renderChart();
+    });
+  }
 
   // Enter key = Unlock
   document.getElementById("pagePassword").addEventListener("keydown", (e) => {
