@@ -48,6 +48,46 @@ const CHART_METRICS = [
 ];
 
 // -------------------------
+// Company ordering + colors
+// -------------------------
+function normalizeCompanyName(name) {
+  return String(name || "").trim();
+}
+
+function companySort(a, b) {
+  const aa = normalizeCompanyName(a);
+  const bb = normalizeCompanyName(b);
+  const aIsSwiis = aa.toLowerCase() === "swiis";
+  const bIsSwiis = bb.toLowerCase() === "swiis";
+  if (aIsSwiis && !bIsSwiis) return -1;
+  if (!aIsSwiis && bIsSwiis) return 1;
+  return aa.localeCompare(bb);
+}
+
+// Exact brand colors you requested
+const COMPANY_COLORS = {
+  swiis: "#f59e0b",
+  capstone: "#0d66a2",
+  compass: "#1897d3",
+  fca: "#f27a30",
+  nfa: "#f9ae42",
+  "orange grove": "#51277d",
+  orangegrove: "#51277d",     // in case spacing differs
+  tact: "#b22288"
+};
+
+function companyColor(company) {
+  const key = normalizeCompanyName(company).toLowerCase();
+  if (COMPANY_COLORS[key]) return COMPANY_COLORS[key];
+
+  // fallback deterministic color
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  const hue = hash % 360;
+  return `hsl(${hue}, 70%, 45%)`;
+}
+
+// -------------------------
 // DOM helpers
 // -------------------------
 function el(tag, attrs = {}, children = []) {
@@ -113,20 +153,7 @@ function linkifyTextToHtml(text) {
 }
 
 // -------------------------
-// Company ordering (Swiis first always)
-// -------------------------
-function companySort(a, b) {
-  const aa = String(a || "").trim();
-  const bb = String(b || "").trim();
-  const aIsSwiis = aa.toLowerCase() === "swiis";
-  const bIsSwiis = bb.toLowerCase() === "swiis";
-  if (aIsSwiis && !bIsSwiis) return -1;
-  if (!aIsSwiis && bIsSwiis) return 1;
-  return aa.localeCompare(bb);
-}
-
-// -------------------------
-// Instagram breakdown + totals
+// Instagram breakdown + totals (UPDATED: graphic image)
 // -------------------------
 function pickNumberFromObject(obj, keys) {
   for (const k of keys) {
@@ -138,22 +165,31 @@ function pickNumberFromObject(obj, keys) {
   return null;
 }
 
+// You clarified the real key is `image_graphic` (Xano screenshot)
+// Also keep older aliases just in case other rows differ.
 function formatPostsBreakdown(obj) {
   if (!obj || typeof obj !== "object") return null;
 
-  // Accept a wide range of possible key names coming from Xano
-  const images = pickNumberFromObject(obj, [
-    "Images", "images", "Image", "image", "image_total", "images_total", "image_posts", "images_posts"
+  const graphic = pickNumberFromObject(obj, [
+    "graphic_image",
+    "Graphic Image",
+    "Graphic",
+    "graphic",
+    "image_graphic",
+    "Image Graphic",
+    "imageGraphic",
+    "Image",
+    "image",
+    "Images",
+    "images"
   ]);
 
   const reels = pickNumberFromObject(obj, [
-    "Reels", "reels", "reels_video", "reel", "reelsVideo"
-  ]);
-
-  // You asked for "video" and "quantity" to show too.
-  // Common possibilities: "video", "videos", "Video", plus "quantity", "Quantity"
-  const video = pickNumberFromObject(obj, [
-    "Video", "video", "Videos", "videos", "video_posts", "videos_posts"
+    "Reels",
+    "reels",
+    "reels_video",
+    "reel",
+    "reelsVideo"
   ]);
 
   const quantity = pickNumberFromObject(obj, [
@@ -161,12 +197,14 @@ function formatPostsBreakdown(obj) {
   ]);
 
   const total = pickNumberFromObject(obj, [
-    "Total", "total", "number_of_monthly_instagram_posts_total", "total_posts"
+    "Total",
+    "total",
+    "number_of_monthly_instagram_posts_total",
+    "total_posts"
   ]);
 
   const parts = [];
-  if (images !== null) parts.push(`Images: ${images.toLocaleString()}`);
-  if (video !== null) parts.push(`Video: ${video.toLocaleString()}`);
+  if (graphic !== null) parts.push(`Graphic images: ${graphic.toLocaleString()}`);
   if (reels !== null) parts.push(`Reels: ${reels.toLocaleString()}`);
   if (quantity !== null) parts.push(`Quantity: ${quantity.toLocaleString()}`);
   if (total !== null) parts.push(`Total: ${total.toLocaleString()}`);
@@ -192,14 +230,16 @@ function formatEngagementBreakdown(obj) {
 function extractPostsTotal(obj) {
   if (!obj || typeof obj !== "object") return toNumberOrNull(obj);
   return pickNumberFromObject(obj, [
-    "Total", "total", "number_of_monthly_instagram_posts_total", "total_posts"
+    "Total",
+    "total",
+    "number_of_monthly_instagram_posts_total",
+    "total_posts"
   ]);
 }
 
 function extractEngagementTotal(obj) {
   if (!obj || typeof obj !== "object") return toNumberOrNull(obj);
-  const n = toNumberOrNull(obj.Total ?? obj.total ?? obj.total_engagement ?? obj.totalEngagement);
-  return n;
+  return toNumberOrNull(obj.Total ?? obj.total ?? obj.total_engagement ?? obj.totalEngagement);
 }
 
 // -------------------------
@@ -330,11 +370,6 @@ function computeMinMaxMonthKey(rows) {
   return { min: keys[0] || null, max: keys[keys.length - 1] || null };
 }
 
-function uniqueCompanies(rows) {
-  const set = new Set(rows.map(r => String(r.company || "").trim()).filter(Boolean));
-  return Array.from(set).sort(companySort);
-}
-
 function renderCompanyToggles(companies) {
   const mount = document.getElementById("companyToggle");
   mount.innerHTML = "";
@@ -390,7 +425,7 @@ function normalizeRow(row) {
 }
 
 // -------------------------
-// Modals (unchanged from your current working version)
+// Modals (same as prior working version)
 // -------------------------
 let editModalState = null;
 let editTextModalState = null;
@@ -659,15 +694,6 @@ function buildMetricsTable(visibleMonths, companies) {
 // -------------------------
 let metricChart = null;
 
-function companyColor(company) {
-  if (String(company).toLowerCase() === "swiis") return "#f59e0b"; // orange
-  let hash = 0;
-  const s = String(company);
-  for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
-  const hue = hash % 360;
-  return `hsl(${hue}, 70%, 45%)`;
-}
-
 function getNumericMetricValue(row, metricKey) {
   if (!row) return null;
   if (metricKey === "number_of_monthly_instagram_posts") return extractPostsTotal(row.number_of_monthly_instagram_posts);
@@ -718,8 +744,7 @@ function renderChart() {
 
   const singleMonth = visibleMonths.length === 1;
 
-  const allCompanies = uniqueCompanies(state.rows);
-  const companies = allCompanies.filter(c => state.selectedCompanies.has(c));
+  const companies = uniqueCompanies(state.rows).filter(c => state.selectedCompanies.has(c));
 
   if (modeLabel) {
     modeLabel.textContent = singleMonth
@@ -789,9 +814,7 @@ function refresh() {
   }
 
   const visibleMonths = state.visibleMonths.length ? state.visibleMonths : [state.latestMonthKey];
-
-  const allCompanies = uniqueCompanies(state.rows); // already Swiis-first
-  const selected = allCompanies.filter(c => state.selectedCompanies.has(c));
+  const selected = uniqueCompanies(state.rows).filter(c => state.selectedCompanies.has(c)); // Swiis-first
 
   document.getElementById("lastUpdated").textContent =
     `Loaded from Xano. Latest month in Xano: ${state.latestMonthKey}. Viewing: ${visibleMonths.join(", ")}.`;
@@ -803,7 +826,6 @@ function refresh() {
   }
 
   mount.appendChild(buildMetricsTable(visibleMonths, selected));
-
   ensureChartMetricOptions(false);
   renderChart();
 }
@@ -930,11 +952,10 @@ async function init() {
   wireEditModals();
   ensureChartMetricOptions(true);
 
-  // Chart rerender on metric selection
   const chartSelect = document.getElementById("chartMetricSelect");
   if (chartSelect) chartSelect.addEventListener("change", renderChart);
 
-  // Enter key = Unlock
+  // Enter = Unlock
   document.getElementById("pagePassword").addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -971,7 +992,6 @@ async function init() {
       await attemptUnlock(pw);
       setLockedUI(false);
 
-      // Populate year/month selectors spanning ALL data
       if (state.minMonthKey && state.maxMonthKey) {
         const minY = Number(state.minMonthKey.split("-")[0]);
         const maxY = Number(state.maxMonthKey.split("-")[0]);
