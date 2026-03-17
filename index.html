@@ -72,6 +72,18 @@
       font-size: 13px;
     }
 
+    /* Test button style */
+    #testZapBtn {
+      background: #0ea5a4;
+      color: #fff;
+      border: 1px solid #065f5b;
+      padding: 8px 12px;
+      border-radius: 10px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    #testZapBtn:hover { filter: brightness(0.95); }
+
     /* Time-range UI */
     .range-grid {
       display: grid;
@@ -331,7 +343,8 @@
 
         <div class="collect-row">
           <button id="collectDataBtn" type="button">Collect data</button>
-          <span class="desc">Click to collect last month’s data.</span>
+          <button id="testZapBtn" type="button">Send test to Zap</button>
+          <span class="desc">Click to collect last month’s data. Use the test button to send a sample payload to Zapier.</span>
         </div>
 
         <div id="metricsDisplay" class="table-wrap"></div>
