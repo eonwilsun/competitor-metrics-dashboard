@@ -1,0 +1,146 @@
+name: Collect SWIIS Agency Fee
+
+on:
+  workflow_dispatch:
+    inputs:
+      month_key:
+        description: 'Month key (YYYY-MM). Leave empty to use previous UTC month.'
+        required: false
+      company:
+        description: 'Company name in your Xano table'
+        required: false
+        default: 'SWIIS'
+  schedule:
+    - cron: '0 2 1 * *' # runs monthly at 02:00 UTC on the 1st — adjust as needed
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Run scraper and upsert to Xano
+        env:
+          # Required secrets (add these to repo Settings -> Secrets -> Actions)
+          XANO_BASE_URL: ${{ secrets.XANO_BASE_URL }}
+          XANO_UPSERT_PATH: ${{ secrets.XANO_UPSERT_PATH }} # e.g. /upsert_monthly_metrics
+          XANO_EDIT_KEY: ${{ secrets.XANO_EDIT_KEY }}
+          XANO_UPSERT_SECRET: ${{ secrets.XANO_UPSERT_SECRET }} # optional, if your Xano endpoint requires secret in body
+          # Optional: override target page
+          TARGET_URL: ${{ secrets.TARGET_URL_SWIIS }} # optional secret or sentinel; fallback below
+        run: |
+          mkdir -p scripts
+          cat > scripts/collect_swiis.js <<'NODE'
+          // collect_swiis.js
+          // Usage: env vars supplied by GitHub Actions:
+          //   XANO_BASE_URL, XANO_UPSERT_PATH, XANO_EDIT_KEY, XANO_UPSERT_SECRET (optional)
+          //   TARGET_URL (optional), INPUT_MONTH_KEY, INPUT_COMPANY
+          (async () => {
+            try {
+              const fetch = globalThis.fetch || (await import('node-fetch')).default;
+
+              const target = process.env.TARGET_URL || 'https://www.swiisfostercare.com/fostering/fostering-allowance-pay/';
+              const company = process.env.INPUT_COMPANY || process.env.GITHUB_INPUT_COMPANY || 'SWIIS';
+              const inputMonthKey = process.env.INPUT_MONTH_KEY || process.env.GITHUB_INPUT_MONTH_KEY || '';
+
+              // compute month_key default = previous UTC month
+              function previousMonthKeyUTCFromNow() {
+                const now = new Date();
+                const dt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+                dt.setUTCMonth(dt.getUTCMonth() - 1);
+                return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}`;
+              }
+              const month_key = (inputMonthKey && inputMonthKey.length>=7) ? inputMonthKey : previousMonthKeyUTCFromNow();
+
+              console.log(`Scraping ${target} for ${company} month ${month_key}`);
+
+              const res = await fetch(target, {
+                method: 'GET',
+                headers: {
+                  'User-Agent': 'Mozilla/5.0 (compatible; collect-swiis-bot/1.0)'
+                },
+                timeout: 30000
+              });
+
+              if (!res.ok) {
+                console.error('Target fetch failed:', res.status, res.statusText);
+                process.exit(2);
+              }
+
+              const html = await res.text();
+
+              // Parsing strategy: find "One Child" then the first "£" number afterwards.
+              let match = html.match(/One Child[\s\S]{0,800}?£\s*([0-9,]+)/i)
+                       || html.match(/One child[\s\S]{0,800}?£\s*([0-9,]+)/i)
+                       || html.match(/child[\s\S]{0,200}?£\s*([0-9,]+)/i);
+
+              if (!match) {
+                console.error('Could not locate fee on page (regex). Sample snippet:');
+                console.error(html.slice(0, 1200));
+                process.exit(3);
+              }
+
+              const numStr = (match[1] || '').replace(/[^0-9]/g, '');
+              const weekly = Number(numStr);
+              if (!Number.isFinite(weekly)) {
+                console.error('Parsed fee is not a number:', numStr);
+                process.exit(4);
+              }
+              const yearly = Math.round(weekly * 52);
+              console.log('Parsed weekly:', weekly, 'yearly:', yearly);
+
+              // Call Xano upsert endpoint
+              const base = (process.env.XANO_BASE_URL || '').replace(/\/$/, '');
+              const path = process.env.XANO_UPSERT_PATH || '/upsert_monthly_metrics';
+              if (!base) {
+                console.error('Missing XANO_BASE_URL env var');
+                process.exit(5);
+              }
+              const url = base + path;
+              const body = {
+                company,
+                month_key,
+                weekly,
+                yearly
+              };
+              if (process.env.XANO_UPSERT_SECRET) body.secret = process.env.XANO_UPSERT_SECRET;
+
+              const headers = {
+                'Content-Type': 'application/json'
+              };
+              if (process.env.XANO_EDIT_KEY) headers['x-edit-key'] = process.env.XANO_EDIT_KEY;
+
+              console.log('Posting to Xano:', url);
+              const up = await fetch(url, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(body)
+              });
+
+              const upText = await up.text();
+              let upJson = null;
+              try { upJson = JSON.parse(upText); } catch (e) { /* ignore */ }
+
+              if (!up.ok) {
+                console.error('Xano upsert failed:', up.status, up.statusText, upText);
+                process.exit(6);
+              }
+
+              console.log('Xano upsert response:', upJson || upText);
+              console.log('Success');
+            } catch (err) {
+              console.error('Error:', err);
+              process.exit(10);
+            }
+          })();
+          NODE
+
+          # Run the script with environment mapped for workflow inputs
+          # GitHub exposes workflow_dispatch inputs as environment variables with prefix INPUT_ when using run steps.
+          node scripts/collect_swiis.js
