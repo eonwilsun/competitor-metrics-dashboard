@@ -8,6 +8,17 @@ const EDIT_KEY_NAME = "EDIT_KEY";
 const SESSION_KEY = "cmd.editKey.v1";
 
 // -------------------------
+// Collect button -> Zapier hook (v1)
+// -------------------------
+// This is designed so "Collect data" can eventually trigger multiple collectors.
+// For now, it triggers a Zapier Zap (Catch Hook) that should scrape SWIIS fee page and update Xano.
+//
+// IMPORTANT:
+// - If your GitHub repo is public, anyone can see this URL and trigger the Zap.
+//   Consider using a proxy (Cloudflare Worker) or a secret token in the payload.
+const ZAPIER_CATCH_HOOK_URL = "PASTE_YOUR_ZAPIER_CATCH_HOOK_URL_HERE";
+
+// -------------------------
 // Metrics (table columns)
 // -------------------------
 const METRIC_FIELDS = [
@@ -263,6 +274,12 @@ function previousMonthKeyUTC(monthKey) {
   return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
+function lastMonthKeyUtcYYYYMM() {
+  // Today is whatever; we compute last month based on UTC calendar month.
+  const thisKey = currentMonthKeyUTC();
+  return previousMonthKeyUTC(thisKey);
+}
+
 // -------------------------
 // Session + Xano
 // -------------------------
@@ -365,19 +382,16 @@ function findRowByCompanyAndMonth(companyName, monthKey) {
 function normalizeRow(row) {
   const r = { ...row };
 
-  // derived fee fields from object
   const feeObj = r.agency_fee_one_child;
   if (feeObj && typeof feeObj === "object") {
     r.agency_fee_one_child_weekly = toNumberOrNull(feeObj.Weekly ?? feeObj.weekly);
     r.agency_fee_one_child_yearly = toNumberOrNull(feeObj.Yearly ?? feeObj.yearly);
   }
 
-  // posts virtual columns (derive total for UI)
   r.posts_images = readPostsImages(r) ?? 0;
   r.posts_reels = readPostsReels(r) ?? 0;
   r.posts_total = derivePostsTotal(r.posts_images, r.posts_reels);
 
-  // engagement virtual columns
   r.engagement_total = readEngagementTotal(r);
   r.engagement_rate_percentage = readEngagementRate(r);
 
@@ -397,7 +411,6 @@ function getRowId(row) {
 function buildPatchBodyForMetric(row, fieldKey, rawNum) {
   const num = Number(rawNum);
 
-  // Agency fee virtual fields -> patch agency_fee_one_child object
   if (fieldKey === "agency_fee_one_child_weekly" || fieldKey === "agency_fee_one_child_yearly") {
     const rootKey = "agency_fee_one_child";
     const childKey = fieldKey === "agency_fee_one_child_weekly" ? "Weekly" : "Yearly";
@@ -405,7 +418,6 @@ function buildPatchBodyForMetric(row, fieldKey, rawNum) {
     return { [rootKey]: { ...current, [childKey]: Math.round(num) } };
   }
 
-  // Posts: images/reels editable; always update total automatically in Xano.
   if (fieldKey === "posts_images" || fieldKey === "posts_reels") {
     const rootKey = "number_of_monthly_instagram_posts";
     const current = (row && typeof row[rootKey] === "object" && row[rootKey]) ? row[rootKey] : {};
@@ -421,10 +433,8 @@ function buildPatchBodyForMetric(row, fieldKey, rawNum) {
     return { [rootKey]: next };
   }
 
-  // Total is derived -> no PATCH from UI
   if (fieldKey === "posts_total") return null;
 
-  // Engagement: editable total + rate
   if (fieldKey === "engagement_total" || fieldKey === "engagement_rate_percentage") {
     const rootKey = "monthly_instagram_engagement";
     const current = (row && typeof row[rootKey] === "object" && row[rootKey]) ? row[rootKey] : {};
@@ -436,7 +446,6 @@ function buildPatchBodyForMetric(row, fieldKey, rawNum) {
     return { [rootKey]: next };
   }
 
-  // Default: patch top-level numeric fields (rounded)
   return { [fieldKey]: Math.round(num) };
 }
 
@@ -991,7 +1000,7 @@ function applyMetricsTableStyling() {
 }
 
 // -------------------------
-// Refresh / load / init
+// Refresh / reload
 // -------------------------
 function refresh() {
   const mount = document.getElementById("metricsDisplay");
@@ -1150,6 +1159,33 @@ function setQuickLastMonth() {
 }
 
 // -------------------------
+// Collect action: trigger Zapier
+// -------------------------
+async function triggerZapierCollectAgencyFeeSwiisLastMonth() {
+  if (!ZAPIER_CATCH_HOOK_URL || ZAPIER_CATCH_HOOK_URL.includes("PASTE_")) {
+    throw new Error("Missing ZAPIER_CATCH_HOOK_URL in assets/app.js");
+  }
+
+  const payload = {
+    action: "collect_agency_fees",
+    company: "SWIIS",
+    month_key: lastMonthKeyUtcYYYYMM(),
+    source_url: "https://www.swiisfostercare.com/fostering/fostering-allowance-pay/"
+  };
+
+  const res = await fetch(ZAPIER_CATCH_HOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new Error(`Zapier hook failed (${res.status}): ${t || res.statusText}`);
+  }
+}
+
+// -------------------------
 // Init
 // -------------------------
 async function init() {
@@ -1160,11 +1196,31 @@ async function init() {
   const chartSelect = document.getElementById("chartMetricSelect");
   if (chartSelect) chartSelect.addEventListener("change", renderChart);
 
-  // NEW: Collect data button (placeholder for scraper)
+  // Collect data button
   const collectBtn = document.getElementById("collectDataBtn");
   if (collectBtn) {
     collectBtn.addEventListener("click", async () => {
-      alert("Collect data: coming soon. This will collect last month’s data.");
+      const prevText = collectBtn.textContent;
+
+      try {
+        collectBtn.disabled = true;
+        collectBtn.textContent = "Collecting...";
+
+        // v1: trigger Zapier to scrape SWIIS agency fee and write back to Xano
+        await triggerZapierCollectAgencyFeeSwiisLastMonth();
+
+        // give Zapier some time to run then refresh
+        setTimeout(async () => {
+          try { await reloadFromXanoAndRefresh(); } catch (e) { console.warn(e); }
+        }, 15000);
+
+        alert("Collect started. Wait ~10–60 seconds, then your dashboard will refresh.");
+      } catch (err) {
+        alert(String(err?.message || err));
+      } finally {
+        collectBtn.disabled = false;
+        collectBtn.textContent = prevText;
+      }
     });
   }
 
