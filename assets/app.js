@@ -1,28 +1,274 @@
-// Full assets/app.js replacement (trimmed non-essential UI code for brevity).
-// This file wires three buttons:
-// - Collect data (existing Zapier flow if you still use it)
-// - Trigger GitHub Action via Xano endpoint (secure server-side dispatch) <- new
-// - Test Zap (sends test payload to your Zapier catch hook)
+// -------------------------
+// Xano config
+// -------------------------
+const XANO_BASE_URL = "https://x8ki-letl-twmt.n7.xano.io/api:ZvixoXZ8";
+const XANO_TABLE_PATH = "/competitor_metrics_dashboard2";
+const XANO_CONFIG_PATH = "/app_config";
+const EDIT_KEY_NAME = "EDIT_KEY";
+const SESSION_KEY = "cmd.editKey.v1";
 
-const XANO_BASE_URL = "https://x8ki-letl-twmt.n7.xano.io/api:ZvixoXZ8"; // <--- replace with your Xano base if different
-const XANO_TRIGGER_PATH = "/trigger_collect_via_github"; // endpoint we'll create in Xano
-const ZAPIER_CATCH_HOOK_URL = "PASTE_YOUR_ZAPIER_CATCH_HOOK_URL_HERE"; // if you still use Zapier directly
+// -------------------------
+// Metrics (table columns)
+// -------------------------
+const METRIC_FIELDS = [
+  { key: "domain_authority", label: "Authority Score", format: "int" },
+  { key: "number_of_referring_domains", label: "Referring Domains", format: "int" },
+  { key: "number_of_organic_keywords", label: "Organic Keywords", format: "int" },
+  { key: "organic_traffic", label: "Organic Traffic (est.)", format: "int" },
 
-const SESSION_KEY = "cmd.editKey.v1"; // used by your existing app to store edit key
+  { key: "instagram_followers", label: "Instagram Followers", format: "int" },
 
-// Small helpers (only what we need here)
+  // Posts / month: Images & Reels editable, Total derived
+  { key: "posts_images", label: "Posts / month — Images", format: "int" },
+  { key: "posts_reels", label: "Posts / month — Reels", format: "int" },
+  { key: "posts_total", label: "Posts / month — Total", format: "int", readOnly: true },
+
+  // Engagement: both editable
+  { key: "engagement_total", label: "Engagements / month — Total", format: "int" },
+  { key: "engagement_rate_percentage", label: "Engagement rate %", format: "float" },
+
+  { key: "agency_fee_one_child_weekly", label: "Agency Fee (1 child) / week", format: "int" },
+  { key: "agency_fee_one_child_yearly", label: "Agency Fee (1 child) / year", format: "int" },
+
+  { key: "meta_ads_running", label: "Meta Ads Running", format: "int" },
+
+  { key: "monthly_press_coverage", label: "Monthly Press Coverage", format: "richtext", editable: true }
+];
+
+const NOTES_FIELD_KEY = "notes";
+
+// -------------------------
+// Chart metrics
+// -------------------------
+const CHART_METRICS = [
+  { key: "domain_authority", label: "Authority Score" },
+  { key: "number_of_referring_domains", label: "Referring Domains" },
+  { key: "number_of_organic_keywords", label: "Organic Keywords" },
+  { key: "organic_traffic", label: "Organic Traffic (est.)" },
+  { key: "instagram_followers", label: "Instagram Followers" },
+  { key: "agency_fee_one_child_weekly", label: "Agency Fee / week" },
+  { key: "agency_fee_one_child_yearly", label: "Agency Fee / year" },
+  { key: "meta_ads_running", label: "Meta Ads Running" },
+  { key: "number_of_monthly_instagram_posts", label: "Posts / month (Total)" },
+  { key: "monthly_instagram_engagement", label: "Engagements / month (Total)" }
+];
+
+// -------------------------
+// Company ordering + colors
+// -------------------------
+function normalizeCompanyName(name) {
+  return String(name || "").trim();
+}
+
+function companySort(a, b) {
+  const aa = normalizeCompanyName(a);
+  const bb = normalizeCompanyName(b);
+  const aIsSwiis = aa.toLowerCase() === "swiis";
+  const bIsSwiis = bb.toLowerCase() === "swiis";
+  if (aIsSwiis && !bIsSwiis) return -1;
+  if (!aIsSwiis && bIsSwiis) return 1;
+  return aa.localeCompare(bb);
+}
+
+const COMPANY_COLORS = {
+  swiis: "#ef5d2f",
+  capstone: "#0d66a2",
+  compass: "#1897d3",
+  fca: "#f27a30",
+  nfa: "#f9ae42",
+  "orange grove": "#51277d",
+  orangegrove: "#51277d",
+  tact: "#b22288"
+};
+
+function companyColor(company) {
+  const key = normalizeCompanyName(company).toLowerCase();
+  if (COMPANY_COLORS[key]) return COMPANY_COLORS[key];
+
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  const hue = hash % 360;
+  return `hsl(${hue}, 70%, 45%)`;
+}
+
+// -------------------------
+// DOM helpers
+// -------------------------
+function el(tag, attrs = {}, children = []) {
+  const node = document.createElement(tag);
+  for (const [k, val] of Object.entries(attrs)) {
+    if (k === "className") node.className = val;
+    else if (k === "text") node.textContent = val;
+    else if (k === "html") node.innerHTML = val;
+    else node.setAttribute(k, val);
+  }
+  for (const c of children) node.appendChild(c);
+  return node;
+}
+
+// -------------------------
+// Formatting + parsing
+// -------------------------
+function toNumberOrNull(v) {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isNaN(n) ? null : n;
+}
+
+function normalizeText(v) {
+  if (v === null || v === undefined) return null;
+  const s = String(v).trim();
+  return s.length ? s : null;
+}
+
+function formatValue(v, format) {
+  if (v === null || v === undefined || v === "") return "—";
+
+  if (format === "int") {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return "—";
+    return Math.round(n).toLocaleString();
+  }
+
+  if (format === "float") {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return "—";
+    const fixed = n.toFixed(2);
+    return fixed.replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
+  }
+
+  return String(v);
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function linkifyTextToHtml(text) {
+  if (text === null || text === undefined) return "";
+  const safe = escapeHtml(String(text));
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const withLinks = safe.replace(urlRegex, (url) => {
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+  });
+  return withLinks.replaceAll("\n", "<br>");
+}
+
+// -------------------------
+// Object helpers (posts + engagement)
+// -------------------------
+function getObj(root) {
+  return root && typeof root === "object" ? root : {};
+}
+
+function readPostsImages(row) {
+  return toNumberOrNull(getObj(row?.number_of_monthly_instagram_posts).image_graphic);
+}
+function readPostsReels(row) {
+  return toNumberOrNull(getObj(row?.number_of_monthly_instagram_posts).reels_video);
+}
+function derivePostsTotal(images, reels) {
+  return (toNumberOrNull(images) ?? 0) + (toNumberOrNull(reels) ?? 0);
+}
+
+function readEngagementTotal(row) {
+  return toNumberOrNull(getObj(row?.monthly_instagram_engagement).total_engagement);
+}
+function readEngagementRate(row) {
+  return toNumberOrNull(getObj(row?.monthly_instagram_engagement).engagement_rate_percentage);
+}
+
+// -------------------------
+// Extract totals for charts/averages
+// -------------------------
+function extractPostsTotal(obj) {
+  if (!obj || typeof obj !== "object") return toNumberOrNull(obj);
+  return toNumberOrNull(obj.number_of_monthly_instagram_posts_total ?? obj.Total ?? obj.total ?? obj.total_posts);
+}
+
+function extractEngagementTotal(obj) {
+  if (!obj || typeof obj !== "object") return toNumberOrNull(obj);
+  return toNumberOrNull(obj.total_engagement ?? obj.Total ?? obj.total ?? obj.totalEngagement);
+}
+
+// -------------------------
+// Month helpers
+// -------------------------
+const MONTHS = {
+  january: "01", february: "02", march: "03", april: "04",
+  may: "05", june: "06", july: "07", august: "08",
+  september: "09", october: "10", november: "11", december: "12"
+};
+
+const MONTH_LABELS = [
+  { name: "January", value: "01" }, { name: "February", value: "02" }, { name: "March", value: "03" },
+  { name: "April", value: "04" }, { name: "May", value: "05" }, { name: "June", value: "06" },
+  { name: "July", value: "07" }, { name: "August", value: "08" }, { name: "September", value: "09" },
+  { name: "October", value: "10" }, { name: "November", value: "11" }, { name: "December", value: "12" }
+];
+
+function monthKeyFromYearMonthName(year, monthName) {
+  const mm = MONTHS[String(monthName || "").toLowerCase()];
+  if (!mm) return null;
+  return `${year}-${mm}`;
+}
+
+function monthKeyFromYYYYMMParts(year, mm) {
+  return `${String(year).trim()}-${String(mm).padStart(2, "0")}`;
+}
+
+function parseMonthKey(mk) {
+  if (!mk || typeof mk !== "string" || mk.length < 7) return null;
+  const [y, m] = mk.split("-");
+  return { year: Number(y), month: String(m).padStart(2, "0") };
+}
+
+function compareMonthKey(a, b) {
+  return String(a).localeCompare(String(b));
+}
+
+function listMonthKeysBetween(startKey, endKey) {
+  const s = parseMonthKey(startKey);
+  const e = parseMonthKey(endKey);
+  if (!s || !e) return [];
+
+  const start = new Date(Date.UTC(s.year, Number(s.month) - 1, 1));
+  const end = new Date(Date.UTC(e.year, Number(e.month) - 1, 1));
+  if (start > end) return [];
+
+  const out = [];
+  const cur = new Date(start);
+  while (cur <= end) {
+    out.push(`${cur.getUTCFullYear()}-${String(cur.getUTCMonth() + 1).padStart(2, "0")}`);
+    cur.setUTCMonth(cur.getUTCMonth() + 1);
+  }
+  return out;
+}
+
+function currentMonthKeyUTC() {
+  const now = new Date();
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function previousMonthKeyUTC(monthKey) {
+  const p = parseMonthKey(monthKey);
+  if (!p) return null;
+  const dt = new Date(Date.UTC(p.year, Number(p.month) - 1, 1));
+  dt.setUTCMonth(dt.getUTCMonth() - 1);
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+// -------------------------
+// Session + Xano
+// -------------------------
 function getEditKey() { return sessionStorage.getItem(SESSION_KEY) || ""; }
 function setEditKey(k) { sessionStorage.setItem(SESSION_KEY, k); }
 function clearEditKey() { sessionStorage.removeItem(SESSION_KEY); }
-
-function lastMonthKeyUtcYYYYMM() {
-  const now = new Date();
-  const dt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  dt.setUTCMonth(dt.getUTCMonth() - 1);
-  const y = dt.getUTCFullYear();
-  const m = String(dt.getUTCMonth() + 1).padStart(2, "0");
-  return `${y}-${m}`;
-}
 
 async function xanoFetch(path, { method = "GET", body = null, withEditKey = true } = {}) {
   const headers = { "Content-Type": "application/json" };
@@ -44,147 +290,537 @@ async function xanoFetch(path, { method = "GET", body = null, withEditKey = true
   return await res.json();
 }
 
-// -----------------------------
-// 1) Trigger GitHub Actions via Xano endpoint (secure)
-// -----------------------------
-// This function calls your Xano endpoint: POST /trigger_collect_via_github
-// The endpoint will verify the edit key (we send it in the request body), then use
-// the server-side stored GITHUB_PAT to call GitHub API and dispatch the workflow.
-async function triggerCollectViaXanoWorkflow({ company = "SWIIS", month_key = null } = {}) {
-  const mk = month_key || lastMonthKeyUtcYYYYMM();
-  const editKey = getEditKey();
-  if (!editKey) throw new Error("Not authenticated — please unlock the dashboard first.");
-
-  const payload = {
-    company,
-    month_key: mk,
-    edit_key: editKey
-  };
-
-  // Call Xano trigger (Xano checks edit_key vs stored EDIT_KEY and uses GITHUB_PAT to dispatch)
-  const res = await xanoFetch(XANO_TRIGGER_PATH, { method: "POST", body: payload, withEditKey: false });
-  return res;
+async function fetchEditKeyFromXano() {
+  const res = await xanoFetch(XANO_CONFIG_PATH, { method: "GET", withEditKey: false });
+  const rows = Array.isArray(res) ? res : (res?.items || res?.data || []);
+  const row = rows.find(r => String(r.key || "").trim() === EDIT_KEY_NAME);
+  const value = row?.value;
+  if (value === null || value === undefined) return null;
+  const s = String(value).trim();
+  return s.length ? s : null;
 }
 
-// -----------------------------
-// 2) Zapier trigger (existing flow for tests)
-// -----------------------------
-async function triggerZapierCollectAgencyFeeSwiisLastMonth() {
-  if (!ZAPIER_CATCH_HOOK_URL || ZAPIER_CATCH_HOOK_URL.includes("PASTE_")) {
-    throw new Error("Missing ZAPIER_CATCH_HOOK_URL in app.js");
+async function verifyPassword(pw) {
+  const actual = await fetchEditKeyFromXano();
+  if (!actual) return false;
+  const entered = String(pw || "").trim();
+  if (!entered) return false;
+  return entered === actual;
+}
+
+// -------------------------
+// State
+// -------------------------
+const state = {
+  visibleMonths: [],
+  rangeStartKey: null,
+  rangeEndKey: null,
+  minMonthKey: null,
+  maxMonthKey: null,
+  selectedCompanies: new Set(),
+  rows: [],
+  latestMonthKey: null,
+  lastLoadedAtUtc: null
+};
+
+function computeLatestMonthKey(rows) {
+  const keys = rows.map(r => monthKeyFromYearMonthName(r.year, r.month)).filter(Boolean).sort();
+  return keys[keys.length - 1] || null;
+}
+
+function computeMinMaxMonthKey(rows) {
+  const keys = rows.map(r => monthKeyFromYearMonthName(r.year, r.month)).filter(Boolean).sort();
+  return { min: keys[0] || null, max: keys[keys.length - 1] || null };
+}
+
+function uniqueCompanies(rows) {
+  const set = new Set(rows.map(r => normalizeCompanyName(r.company)).filter(Boolean));
+  return Array.from(set).sort(companySort);
+}
+
+function renderCompanyToggles(companies) {
+  const mount = document.getElementById("companyToggle");
+  mount.innerHTML = "";
+  for (const name of companies) {
+    const id = `cmp_${name.replace(/\s+/g, "_")}`;
+    const checkbox = el("input", { type: "checkbox", id });
+    checkbox.checked = state.selectedCompanies.has(name);
+
+    checkbox.addEventListener("change", () => {
+      checkbox.checked ? state.selectedCompanies.add(name) : state.selectedCompanies.delete(name);
+      refresh();
+    });
+
+    mount.appendChild(el("div", { className: "toggle" }, [
+      checkbox,
+      el("label", { for: id, text: name })
+    ]));
+  }
+}
+
+function findRowByCompanyAndMonth(companyName, monthKey) {
+  return state.rows.find(r => String(r.company) === String(companyName) && monthKeyFromYearMonthName(r.year, r.month) === monthKey);
+}
+
+function normalizeRow(row) {
+  const r = { ...row };
+
+  // derived fee fields from object
+  const feeObj = r.agency_fee_one_child;
+  if (feeObj && typeof feeObj === "object") {
+    r.agency_fee_one_child_weekly = toNumberOrNull(feeObj.Weekly ?? feeObj.weekly);
+    r.agency_fee_one_child_yearly = toNumberOrNull(feeObj.Yearly ?? feeObj.yearly);
   }
 
-  const payload = {
-    secret: "swiissecret",
-    action: "collect_agency_fees",
-    company: "SWIIS",
-    month_key: lastMonthKeyUtcYYYYMM(),
-    source_url: "https://www.swiisfostercare.com/fostering/fostering-allowance-pay/"
-  };
+  // posts virtual columns (derive total for UI)
+  r.posts_images = readPostsImages(r) ?? 0;
+  r.posts_reels = readPostsReels(r) ?? 0;
+  r.posts_total = derivePostsTotal(r.posts_images, r.posts_reels);
 
-  const res = await fetch(ZAPIER_CATCH_HOOK_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+  // engagement virtual columns
+  r.engagement_total = readEngagementTotal(r);
+  r.engagement_rate_percentage = readEngagementRate(r);
+
+  r.monthly_press_coverage = normalizeText(r.monthly_press_coverage);
+
+  return r;
+}
+
+function getRowId(row) {
+  const id = row?.id ?? row?.competitor_metrics_dashboard_id;
+  return (id === null || id === undefined || id === "") ? null : id;
+}
+
+// -------------------------
+// Build PATCH bodies for virtual fields
+// -------------------------
+function buildPatchBodyForMetric(row, fieldKey, rawNum) {
+  const num = Number(rawNum);
+
+  // Agency fee virtual fields -> patch agency_fee_one_child object
+  if (fieldKey === "agency_fee_one_child_weekly" || fieldKey === "agency_fee_one_child_yearly") {
+    const rootKey = "agency_fee_one_child";
+    const childKey = fieldKey === "agency_fee_one_child_weekly" ? "Weekly" : "Yearly";
+    const current = (row && typeof row[rootKey] === "object" && row[rootKey]) ? row[rootKey] : {};
+    return { [rootKey]: { ...current, [childKey]: Math.round(num) } };
+  }
+
+  // Posts: images/reels editable; always update total automatically in Xano.
+  if (fieldKey === "posts_images" || fieldKey === "posts_reels") {
+    const rootKey = "number_of_monthly_instagram_posts";
+    const current = (row && typeof row[rootKey] === "object" && row[rootKey]) ? row[rootKey] : {};
+    const next = { ...current };
+
+    if (fieldKey === "posts_images") next.image_graphic = Math.round(num);
+    if (fieldKey === "posts_reels") next.reels_video = Math.round(num);
+
+    const images = toNumberOrNull(next.image_graphic) ?? 0;
+    const reels = toNumberOrNull(next.reels_video) ?? 0;
+    next.number_of_monthly_instagram_posts_total = images + reels;
+
+    return { [rootKey]: next };
+  }
+
+  // Total is derived -> no PATCH from UI
+  if (fieldKey === "posts_total") return null;
+
+  // Engagement: editable total + rate
+  if (fieldKey === "engagement_total" || fieldKey === "engagement_rate_percentage") {
+    const rootKey = "monthly_instagram_engagement";
+    const current = (row && typeof row[rootKey] === "object" && row[rootKey]) ? row[rootKey] : {};
+    const next = { ...current };
+
+    if (fieldKey === "engagement_total") next.total_engagement = Math.round(num);
+    if (fieldKey === "engagement_rate_percentage") next.engagement_rate_percentage = num;
+
+    return { [rootKey]: next };
+  }
+
+  // Default: patch top-level numeric fields (rounded)
+  return { [fieldKey]: Math.round(num) };
+}
+
+// -------------------------
+// Last updated + chart downloads
+// -------------------------
+function formatUtcTimestamp(dt) {
+  const yyyy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getUTCDate()).padStart(2, "0");
+  const hh = String(dt.getUTCHours()).padStart(2, "0");
+  const mi = String(dt.getUTCMinutes()).padStart(2, "0");
+  const ss = String(dt.getUTCSeconds()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss} UTC`;
+}
+
+function setLastUpdatedAtText() {
+  const el = document.getElementById("lastUpdatedAt");
+  if (!el) return;
+  el.textContent = state.lastLoadedAtUtc ? `Last updated: ${formatUtcTimestamp(state.lastLoadedAtUtc)}` : "";
+}
+
+function downloadDataUrl(filename, dataUrl) {
+  const a = document.createElement("a");
+  a.href = dataUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function downloadChartAs(type) {
+  const canvas = document.getElementById("metricChart");
+  if (!canvas) return alert("Chart not found.");
+  const ext = type === "image/jpeg" ? "jpg" : "png";
+  const dataUrl = canvas.toDataURL(type, 0.92);
+  downloadDataUrl(`chart.${ext}`, dataUrl);
+}
+
+function downloadChartPdfViaPrint() {
+  const canvas = document.getElementById("metricChart");
+  if (!canvas) return alert("Chart not found.");
+
+  const img = canvas.toDataURL("image/png");
+  const w = window.open("", "_blank");
+  if (!w) return alert("Popup blocked. Allow popups to download PDF.");
+
+  w.document.open();
+  w.document.write(`
+<!doctype html>
+<html>
+  <head>
+    <title>Chart</title>
+    <style>
+      body { margin: 0; padding: 24px; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+      img { max-width: 100%; height: auto; }
+      .hint { margin-top: 12px; opacity: 0.7; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <img src="${img}" />
+    <div class="hint">Use your browser Print (Ctrl+P) and choose “Save as PDF”.</div>
+  </body>
+</html>
+  `);
+  w.document.close();
+  w.focus();
+}
+
+function wireChartDownloadButtons() {
+  const pngBtn = document.getElementById("downloadChartPng");
+  const jpgBtn = document.getElementById("downloadChartJpg");
+  const pdfBtn = document.getElementById("downloadChartPdf");
+
+  if (pngBtn) pngBtn.addEventListener("click", () => downloadChartAs("image/png"));
+  if (jpgBtn) jpgBtn.addEventListener("click", () => downloadChartAs("image/jpeg"));
+  if (pdfBtn) pdfBtn.addEventListener("click", () => downloadChartPdfViaPrint());
+}
+
+// -------------------------
+// Modals
+// -------------------------
+let editModalState = null;
+let editTextModalState = null;
+let editNotesModalState = null;
+
+function openEditMetricModal({ row, fieldKey, fieldLabel, currentValue, monthKey }) {
+  editModalState = { row, fieldKey, monthKey };
+
+  const backdrop = document.getElementById("editMetricModalBackdrop");
+  const subtitle = document.getElementById("editMetricSubtitle");
+  const hint = document.getElementById("editMetricHint");
+  if (subtitle) subtitle.textContent = `${row.company} • ${monthKey} • ${fieldLabel}`;
+  if (hint) hint.textContent = "This updates the value in Xano.";
+
+  const input = document.getElementById("editMetricNewValue");
+  if (input) input.value = (currentValue === null || currentValue === undefined) ? "" : String(currentValue);
+
+  if (backdrop) {
+    backdrop.style.display = "flex";
+    backdrop.setAttribute("aria-hidden", "false");
+  }
+  setTimeout(() => input && input.focus(), 0);
+}
+
+function closeEditMetricModal() {
+  const backdrop = document.getElementById("editMetricModalBackdrop");
+  if (backdrop) {
+    backdrop.style.display = "none";
+    backdrop.setAttribute("aria-hidden", "true");
+  }
+  editModalState = null;
+}
+
+function openEditTextModal({ row, fieldKey, fieldLabel, currentValue, monthKey }) {
+  editTextModalState = { row, fieldKey, monthKey };
+
+  const backdrop = document.getElementById("editTextModalBackdrop");
+  const subtitle = document.getElementById("editTextSubtitle");
+  const hint = document.getElementById("editTextHint");
+  if (subtitle) subtitle.textContent = `${row.company} • ${monthKey} • ${fieldLabel}`;
+  if (hint) hint.textContent = "Multiple lines supported. Ctrl+Enter saves.";
+
+  const textarea = document.getElementById("editTextNewValue");
+  if (textarea) textarea.value = (currentValue === null || currentValue === undefined) ? "" : String(currentValue);
+
+  const updateBtn = document.getElementById("editTextUpdate");
+  if (updateBtn) updateBtn.dataset.mode = "press";
+
+  if (backdrop) {
+    backdrop.style.display = "flex";
+    backdrop.setAttribute("aria-hidden", "false");
+  }
+  setTimeout(() => textarea && textarea.focus(), 0);
+}
+
+function openEditNotesModal({ row, monthKey }) {
+  editNotesModalState = { row, monthKey };
+
+  const backdrop = document.getElementById("editTextModalBackdrop");
+  const subtitle = document.getElementById("editTextSubtitle");
+  const hint = document.getElementById("editTextHint");
+  if (subtitle) subtitle.textContent = `${row.company} • ${monthKey} • Notes`;
+  if (hint) hint.textContent = "Edit notes (multi-line). Ctrl+Enter saves.";
+
+  const textarea = document.getElementById("editTextNewValue");
+  if (textarea) textarea.value = row?.[NOTES_FIELD_KEY] ?? "";
+
+  const updateBtn = document.getElementById("editTextUpdate");
+  if (updateBtn) updateBtn.dataset.mode = "notes";
+
+  if (backdrop) {
+    backdrop.style.display = "flex";
+    backdrop.setAttribute("aria-hidden", "false");
+  }
+  setTimeout(() => textarea && textarea.focus(), 0);
+}
+
+function closeEditTextModal() {
+  const backdrop = document.getElementById("editTextModalBackdrop");
+  if (backdrop) {
+    backdrop.style.display = "none";
+    backdrop.setAttribute("aria-hidden", "true");
+  }
+  editTextModalState = null;
+  editNotesModalState = null;
+  const updateBtn = document.getElementById("editTextUpdate");
+  if (updateBtn) updateBtn.dataset.mode = "";
+}
+
+function wireEditModals() {
+  const metricClose = document.getElementById("editMetricClose");
+  if (metricClose) metricClose.addEventListener("click", closeEditMetricModal);
+  const metricBackdrop = document.getElementById("editMetricModalBackdrop");
+  if (metricBackdrop) metricBackdrop.addEventListener("click", (e) => {
+    if (e.target.id === "editMetricModalBackdrop") closeEditMetricModal();
   });
 
-  if (!res.ok) {
-    const t = await res.text().catch(() => "");
-    throw new Error(`Zapier hook failed (${res.status}): ${t || res.statusText}`);
-  }
-  return { ok: true };
-}
-
-// -----------------------------
-// 3) Small helper to send a test payload to the Zapier hook
-// -----------------------------
-async function sendTestPayloadToZapier() {
-  if (!ZAPIER_CATCH_HOOK_URL || ZAPIER_CATCH_HOOK_URL.includes("PASTE_")) {
-    alert("Missing ZAPIER_CATCH_HOOK_URL in app.js. Paste the Zapier hook URL into the constant.");
-    return;
-  }
-
-  const monthKey = lastMonthKeyUtcYYYYMM();
-  const payload = {
-    secret: "swiissecret",
-    month_key: monthKey,
-    action: "collect_agency_fees",
-    company: "SWIIS",
-    source_url: "https://www.swiisfostercare.com/fostering/fostering-allowance-pay/"
-  };
-
-  const res = await fetch(ZAPIER_CATCH_HOOK_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+  const textClose = document.getElementById("editTextClose");
+  if (textClose) textClose.addEventListener("click", closeEditTextModal);
+  const textBackdrop = document.getElementById("editTextModalBackdrop");
+  if (textBackdrop) textBackdrop.addEventListener("click", (e) => {
+    if (e.target.id === "editTextModalBackdrop") closeEditTextModal();
   });
 
-  if (!res.ok) {
-    const txt = await res.text().catch(() => "");
-    alert("Test failed: " + (txt || res.statusText));
-    return;
-  }
+  const metricInput = document.getElementById("editMetricNewValue");
+  if (metricInput) metricInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const btn = document.getElementById("editMetricUpdate");
+      if (btn) btn.click();
+    }
+  });
 
-  alert("Test payload sent. Check Zapier trigger panel.");
+  const textArea = document.getElementById("editTextNewValue");
+  if (textArea) textArea.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      const btn = document.getElementById("editTextUpdate");
+      if (btn) btn.click();
+    }
+  });
+
+  const metricUpdateBtn = document.getElementById("editMetricUpdate");
+  if (metricUpdateBtn) metricUpdateBtn.addEventListener("click", async () => {
+    if (!editModalState) return;
+
+    const btn = document.getElementById("editMetricUpdate");
+    const raw = document.getElementById("editMetricNewValue").value;
+
+    if (raw === "" || raw === null || raw === undefined) return alert("Enter a value.");
+
+    const num = Number(raw);
+    if (!Number.isFinite(num)) return alert("Please enter a valid number.");
+
+    const { row, fieldKey } = editModalState;
+    const rowId = getRowId(row);
+    if (!rowId) return alert("Missing record id.");
+
+    try {
+      btn.disabled = true;
+      btn.textContent = "Saving...";
+
+      const body = buildPatchBodyForMetric(row, fieldKey, num);
+      if (!body) {
+        alert("Total is derived. Edit Images or Reels.");
+        return;
+      }
+
+      await xanoFetch(`${XANO_TABLE_PATH}/${rowId}`, {
+        method: "PATCH",
+        body,
+        withEditKey: true
+      });
+
+      closeEditMetricModal();
+      await reloadFromXanoAndRefresh();
+    } catch (err) {
+      alert(`Save failed: ${String(err?.message || err)}`);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Update";
+    }
+  });
+
+  const textUpdateBtn = document.getElementById("editTextUpdate");
+  if (textUpdateBtn) textUpdateBtn.addEventListener("click", async () => {
+    const mode = textUpdateBtn.dataset.mode || "";
+    const btn = textUpdateBtn;
+    const val = (document.getElementById("editTextNewValue") || {}).value;
+    const payloadVal = (val === "" ? null : val);
+
+    try {
+      btn.disabled = true;
+      btn.textContent = "Saving...";
+
+      if (mode === "press") {
+        const row = editTextModalState?.row;
+        const rowId = getRowId(row);
+        if (!rowId) return alert("Missing record id.");
+
+        await xanoFetch(`${XANO_TABLE_PATH}/${rowId}`, {
+          method: "PATCH",
+          body: { monthly_press_coverage: payloadVal },
+          withEditKey: true
+        });
+
+        closeEditTextModal();
+        await reloadFromXanoAndRefresh();
+        return;
+      }
+
+      if (mode === "notes") {
+        const row = editNotesModalState?.row;
+        const rowId = getRowId(row);
+        if (!rowId) return alert("Missing record id.");
+
+        await xanoFetch(`${XANO_TABLE_PATH}/${rowId}`, {
+          method: "PATCH",
+          body: { [NOTES_FIELD_KEY]: payloadVal },
+          withEditKey: true
+        });
+
+        closeEditTextModal();
+        await reloadFromXanoAndRefresh();
+        return;
+      }
+    } catch (err) {
+      alert(`Save failed: ${String(err?.message || err)}`);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Update";
+    }
+  });
+
+  window.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (editModalState) closeEditMetricModal();
+    if (editTextModalState || editNotesModalState) closeEditTextModal();
+  });
 }
 
-// -----------------------------
-// Wire buttons
-// -----------------------------
-window.addEventListener("DOMContentLoaded", () => {
-  const collectBtn = document.getElementById("collectDataBtn");
-  const triggerBtn = document.getElementById("triggerWorkflowBtn");
-  const testBtn = document.getElementById("testZapBtn");
+// -------------------------
+// Multi-month averaging
+// -------------------------
+function averageNumericForCompanyAcrossMonths(companyName, monthKeys, fieldKey) {
+  const vals = monthKeys
+    .map(mk => findRowByCompanyAndMonth(companyName, mk))
+    .map(r => {
+      if (!r) return null;
+      if (fieldKey === "number_of_monthly_instagram_posts") return extractPostsTotal(r.number_of_monthly_instagram_posts);
+      if (fieldKey === "monthly_instagram_engagement") return extractEngagementTotal(r.monthly_instagram_engagement);
+      return toNumberOrNull(r[fieldKey]);
+    })
+    .filter(v => v !== null);
 
-  if (collectBtn) {
-    collectBtn.addEventListener("click", async () => {
-      const prev = collectBtn.textContent;
-      try {
-        collectBtn.disabled = true;
-        collectBtn.textContent = "Sending...";
-        // keep the old behavior if you still want Zapier collect
-        await triggerZapierCollectAgencyFeeSwiisLastMonth();
-        alert("Zapier collect triggered.");
-      } catch (err) {
-        alert("Collect failed: " + String(err?.message || err));
-      } finally {
-        collectBtn.disabled = false;
-        collectBtn.textContent = prev;
-      }
-    });
-  }
+  if (!vals.length) return null;
+  return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+}
 
-  if (triggerBtn) {
-    triggerBtn.addEventListener("click", async () => {
-      const prev = triggerBtn.textContent;
-      try {
-        triggerBtn.disabled = true;
-        triggerBtn.textContent = "Triggering workflow...";
-        const result = await triggerCollectViaXanoWorkflow({ company: "SWIIS" });
-        // Show basic result
-        alert("Workflow triggered (server). Check Actions UI. Response: " + JSON.stringify(result));
-      } catch (err) {
-        alert("Trigger failed: " + String(err?.message || err));
-        console.error(err);
-      } finally {
-        triggerBtn.disabled = false;
-        triggerBtn.textContent = prev;
-      }
-    });
-  }
+// -------------------------
+// Table rendering
+// -------------------------
+function buildMetricsTable(visibleMonths, companies) {
+  const table = el("table");
+  const thead = el("thead");
+  const trh = el("tr");
 
-  if (testBtn) {
-    testBtn.addEventListener("click", async () => {
-      testBtn.disabled = true;
-      testBtn.textContent = "Sending test...";
-      try {
-        await sendTestPayloadToZapier();
-      } catch (err) {
-        alert("Test failed: " + String(err?.message || err));
-      } finally {
-        testBtn.disabled = false;
-        testBtn.textContent = "Send test to Zap";
+  trh.appendChild(el("th", { text: "Company" }));
+  trh.appendChild(el("th", { text: "Month(s)" }));
+  for (const f of METRIC_FIELDS) trh.appendChild(el("th", { text: f.label }));
+  trh.appendChild(el("th", { text: "Notes" }));
+
+  thead.appendChild(trh);
+  table.appendChild(thead);
+
+  const tbody = el("tbody");
+  const singleMonth = visibleMonths.length === 1;
+
+  for (const companyName of companies) {
+    const tr = el("tr");
+    tr.appendChild(el("td", { text: companyName }));
+    tr.appendChild(el("td", { text: singleMonth ? visibleMonths[0] : `${visibleMonths.length} months` }));
+
+    for (const f of METRIC_FIELDS) {
+      let displayValue = null;
+      let editTargetRow = null;
+      let editMonthKey = null;
+
+      if (singleMonth) {
+        editMonthKey = visibleMonths[0];
+        editTargetRow = findRowByCompanyAndMonth(companyName, editMonthKey);
+        displayValue = editTargetRow ? editTargetRow[f.key] : null;
+      } else {
+        if (f.format === "int" || f.format === "float") displayValue = averageNumericForCompanyAcrossMonths(companyName, visibleMonths, f.key);
+        else displayValue = null;
       }
-    });
-  }
-});
+
+      const td = el("td");
+
+      if (f.format === "richtext") {
+        const html = displayValue ? linkifyTextToHtml(displayValue) : "—";
+        const div = el("div", {
+          className: `clickable-metric metrics-rich${(!displayValue ? " muted-cell" : "")}`,
+          html,
+          title: singleMonth ? "Click to edit" : "Shown only in single-month view"
+        });
+
+        if (singleMonth && editTargetRow && f.editable) {
+          div.addEventListener("click", (e) => {
+            if (e.target && e.target.closest && e.target.closest("a")) return;
+            openEditTextModal({
+              row: editTargetRow,
+              fieldKey: f.key,
+              fieldLabel: f.label,
+              currentValue: editTargetRow[f.key],
+              monthKey: editMonthKey
+            });
+          });
+        }
+
+        td.appendChild(div);
+        tr.appendChild(td);
+        continue;
+      }
+
+  (file truncated in assistant message due to length)
