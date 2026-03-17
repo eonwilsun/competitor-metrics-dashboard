@@ -382,19 +382,16 @@ function findRowByCompanyAndMonth(companyName, monthKey) {
 function normalizeRow(row) {
   const r = { ...row };
 
-  // derived fee fields from object
   const feeObj = r.agency_fee_one_child;
   if (feeObj && typeof feeObj === "object") {
     r.agency_fee_one_child_weekly = toNumberOrNull(feeObj.Weekly ?? feeObj.weekly);
     r.agency_fee_one_child_yearly = toNumberOrNull(feeObj.Yearly ?? feeObj.yearly);
   }
 
-  // posts virtual columns (derive total for UI)
   r.posts_images = readPostsImages(r) ?? 0;
   r.posts_reels = readPostsReels(r) ?? 0;
   r.posts_total = derivePostsTotal(r.posts_images, r.posts_reels);
 
-  // engagement virtual columns
   r.engagement_total = readEngagementTotal(r);
   r.engagement_rate_percentage = readEngagementRate(r);
 
@@ -414,7 +411,6 @@ function getRowId(row) {
 function buildPatchBodyForMetric(row, fieldKey, rawNum) {
   const num = Number(rawNum);
 
-  // Agency fee virtual fields -> patch agency_fee_one_child object
   if (fieldKey === "agency_fee_one_child_weekly" || fieldKey === "agency_fee_one_child_yearly") {
     const rootKey = "agency_fee_one_child";
     const childKey = fieldKey === "agency_fee_one_child_weekly" ? "Weekly" : "Yearly";
@@ -422,7 +418,6 @@ function buildPatchBodyForMetric(row, fieldKey, rawNum) {
     return { [rootKey]: { ...current, [childKey]: Math.round(num) } };
   }
 
-  // Posts: images/reels editable; always update total automatically in Xano.
   if (fieldKey === "posts_images" || fieldKey === "posts_reels") {
     const rootKey = "number_of_monthly_instagram_posts";
     const current = (row && typeof row[rootKey] === "object" && row[rootKey]) ? row[rootKey] : {};
@@ -438,10 +433,8 @@ function buildPatchBodyForMetric(row, fieldKey, rawNum) {
     return { [rootKey]: next };
   }
 
-  // Total is derived -> no PATCH from UI
   if (fieldKey === "posts_total") return null;
 
-  // Engagement: editable total + rate
   if (fieldKey === "engagement_total" || fieldKey === "engagement_rate_percentage") {
     const rootKey = "monthly_instagram_engagement";
     const current = (row && typeof row[rootKey] === "object" && row[rootKey]) ? row[rootKey] : {};
@@ -453,7 +446,6 @@ function buildPatchBodyForMetric(row, fieldKey, rawNum) {
     return { [rootKey]: next };
   }
 
-  // Default: patch top-level numeric fields (rounded)
   return { [fieldKey]: Math.round(num) };
 }
 
@@ -530,7 +522,7 @@ function wireChartDownloadButtons() {
 
   if (pngBtn) pngBtn.addEventListener("click", () => downloadChartAs("image/png"));
   if (jpgBtn) jpgBtn.addEventListener("click", () => downloadChartAs("image/jpeg"));
-  if (pdfBtn) pdfBtn.addEventListener("click", () => downloadChartPdfViaPrint());
+  if (pdfBtn) pdfBtn.addEventListener("click", downloadChartPdfViaPrint);
 }
 
 // -------------------------
@@ -544,27 +536,21 @@ function openEditMetricModal({ row, fieldKey, fieldLabel, currentValue, monthKey
   editModalState = { row, fieldKey, monthKey };
 
   const backdrop = document.getElementById("editMetricModalBackdrop");
-  const subtitle = document.getElementById("editMetricSubtitle");
-  const hint = document.getElementById("editMetricHint");
-  if (subtitle) subtitle.textContent = `${row.company} • ${monthKey} • ${fieldLabel}`;
-  if (hint) hint.textContent = "This updates the value in Xano.";
+  document.getElementById("editMetricSubtitle").textContent = `${row.company} • ${monthKey} • ${fieldLabel}`;
+  document.getElementById("editMetricHint").textContent = "This updates the value in Xano.";
 
   const input = document.getElementById("editMetricNewValue");
-  if (input) input.value = (currentValue === null || currentValue === undefined) ? "" : String(currentValue);
+  input.value = (currentValue === null || currentValue === undefined) ? "" : String(currentValue);
 
-  if (backdrop) {
-    backdrop.style.display = "flex";
-    backdrop.setAttribute("aria-hidden", "false");
-  }
-  setTimeout(() => input && input.focus(), 0);
+  backdrop.style.display = "flex";
+  backdrop.setAttribute("aria-hidden", "false");
+  setTimeout(() => input.focus(), 0);
 }
 
 function closeEditMetricModal() {
   const backdrop = document.getElementById("editMetricModalBackdrop");
-  if (backdrop) {
-    backdrop.style.display = "none";
-    backdrop.setAttribute("aria-hidden", "true");
-  }
+  backdrop.style.display = "none";
+  backdrop.setAttribute("aria-hidden", "true");
   editModalState = null;
 }
 
@@ -572,93 +558,71 @@ function openEditTextModal({ row, fieldKey, fieldLabel, currentValue, monthKey }
   editTextModalState = { row, fieldKey, monthKey };
 
   const backdrop = document.getElementById("editTextModalBackdrop");
-  const subtitle = document.getElementById("editTextSubtitle");
-  const hint = document.getElementById("editTextHint");
-  if (subtitle) subtitle.textContent = `${row.company} • ${monthKey} • ${fieldLabel}`;
-  if (hint) hint.textContent = "Multiple lines supported. Ctrl+Enter saves.";
+  document.getElementById("editTextSubtitle").textContent = `${row.company} • ${monthKey} • ${fieldLabel}`;
+  document.getElementById("editTextHint").textContent = "Multiple lines supported. Ctrl+Enter saves.";
 
   const textarea = document.getElementById("editTextNewValue");
-  if (textarea) textarea.value = (currentValue === null || currentValue === undefined) ? "" : String(currentValue);
+  textarea.value = (currentValue === null || currentValue === undefined) ? "" : String(currentValue);
 
-  const updateBtn = document.getElementById("editTextUpdate");
-  if (updateBtn) updateBtn.dataset.mode = "press";
+  document.getElementById("editTextUpdate").dataset.mode = "press";
 
-  if (backdrop) {
-    backdrop.style.display = "flex";
-    backdrop.setAttribute("aria-hidden", "false");
-  }
-  setTimeout(() => textarea && textarea.focus(), 0);
+  backdrop.style.display = "flex";
+  backdrop.setAttribute("aria-hidden", "false");
+  setTimeout(() => textarea.focus(), 0);
 }
 
 function openEditNotesModal({ row, monthKey }) {
   editNotesModalState = { row, monthKey };
 
   const backdrop = document.getElementById("editTextModalBackdrop");
-  const subtitle = document.getElementById("editTextSubtitle");
-  const hint = document.getElementById("editTextHint");
-  if (subtitle) subtitle.textContent = `${row.company} • ${monthKey} • Notes`;
-  if (hint) hint.textContent = "Edit notes (multi-line). Ctrl+Enter saves.";
+  document.getElementById("editTextSubtitle").textContent = `${row.company} • ${monthKey} • Notes`;
+  document.getElementById("editTextHint").textContent = "Edit notes (multi-line). Ctrl+Enter saves.";
 
   const textarea = document.getElementById("editTextNewValue");
-  if (textarea) textarea.value = row?.[NOTES_FIELD_KEY] ?? "";
+  textarea.value = row?.[NOTES_FIELD_KEY] ?? "";
 
-  const updateBtn = document.getElementById("editTextUpdate");
-  if (updateBtn) updateBtn.dataset.mode = "notes";
+  document.getElementById("editTextUpdate").dataset.mode = "notes";
 
-  if (backdrop) {
-    backdrop.style.display = "flex";
-    backdrop.setAttribute("aria-hidden", "false");
-  }
-  setTimeout(() => textarea && textarea.focus(), 0);
+  backdrop.style.display = "flex";
+  backdrop.setAttribute("aria-hidden", "false");
+  setTimeout(() => textarea.focus(), 0);
 }
 
 function closeEditTextModal() {
   const backdrop = document.getElementById("editTextModalBackdrop");
-  if (backdrop) {
-    backdrop.style.display = "none";
-    backdrop.setAttribute("aria-hidden", "true");
-  }
+  backdrop.style.display = "none";
+  backdrop.setAttribute("aria-hidden", "true");
   editTextModalState = null;
   editNotesModalState = null;
-  const updateBtn = document.getElementById("editTextUpdate");
-  if (updateBtn) updateBtn.dataset.mode = "";
+  document.getElementById("editTextUpdate").dataset.mode = "";
 }
 
 function wireEditModals() {
-  const metricClose = document.getElementById("editMetricClose");
-  if (metricClose) metricClose.addEventListener("click", closeEditMetricModal);
-  const metricBackdrop = document.getElementById("editMetricModalBackdrop");
-  if (metricBackdrop) metricBackdrop.addEventListener("click", (e) => {
+  document.getElementById("editMetricClose").addEventListener("click", closeEditMetricModal);
+  document.getElementById("editMetricModalBackdrop").addEventListener("click", (e) => {
     if (e.target.id === "editMetricModalBackdrop") closeEditMetricModal();
   });
 
-  const textClose = document.getElementById("editTextClose");
-  if (textClose) textClose.addEventListener("click", closeEditTextModal);
-  const textBackdrop = document.getElementById("editTextModalBackdrop");
-  if (textBackdrop) textBackdrop.addEventListener("click", (e) => {
+  document.getElementById("editTextClose").addEventListener("click", closeEditTextModal);
+  document.getElementById("editTextModalBackdrop").addEventListener("click", (e) => {
     if (e.target.id === "editTextModalBackdrop") closeEditTextModal();
   });
 
-  const metricInput = document.getElementById("editMetricNewValue");
-  if (metricInput) metricInput.addEventListener("keydown", (e) => {
+  document.getElementById("editMetricNewValue").addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
-      const btn = document.getElementById("editMetricUpdate");
-      if (btn) btn.click();
+      document.getElementById("editMetricUpdate").click();
     }
   });
 
-  const textArea = document.getElementById("editTextNewValue");
-  if (textArea) textArea.addEventListener("keydown", (e) => {
+  document.getElementById("editTextNewValue").addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
-      const btn = document.getElementById("editTextUpdate");
-      if (btn) btn.click();
+      document.getElementById("editTextUpdate").click();
     }
   });
 
-  const metricUpdateBtn = document.getElementById("editMetricUpdate");
-  if (metricUpdateBtn) metricUpdateBtn.addEventListener("click", async () => {
+  document.getElementById("editMetricUpdate").addEventListener("click", async () => {
     if (!editModalState) return;
 
     const btn = document.getElementById("editMetricUpdate");
@@ -699,11 +663,10 @@ function wireEditModals() {
     }
   });
 
-  const textUpdateBtn = document.getElementById("editTextUpdate");
-  if (textUpdateBtn) textUpdateBtn.addEventListener("click", async () => {
-    const mode = textUpdateBtn.dataset.mode || "";
-    const btn = textUpdateBtn;
-    const val = (document.getElementById("editTextNewValue") || {}).value;
+  document.getElementById("editTextUpdate").addEventListener("click", async () => {
+    const mode = document.getElementById("editTextUpdate").dataset.mode || "";
+    const btn = document.getElementById("editTextUpdate");
+    const val = document.getElementById("editTextNewValue").value;
     const payloadVal = (val === "" ? null : val);
 
     try {
@@ -883,7 +846,7 @@ function buildMetricsTable(visibleMonths, companies) {
 
     if (singleMonth && notesRow) {
       notesDiv.addEventListener("click", (e) => {
-        if (e.target && e.target.closest and e.target.closest("a")) return;
+        if (e.target && e.target.closest && e.target.closest("a")) return;
         openEditNotesModal({ row: notesRow, monthKey: mk });
       });
     }
@@ -1102,13 +1065,13 @@ function setLockedUI(locked) {
   const appRoot = document.getElementById("appRoot");
   const lockBtn = document.getElementById("lockBtn");
   if (locked) {
-    if (lockScreen) lockScreen.classList.remove("hidden");
-    if (appRoot) appRoot.classList.add("hidden");
-    if (lockBtn) lockBtn.classList.add("hidden");
+    lockScreen.classList.remove("hidden");
+    appRoot.classList.add("hidden");
+    lockBtn.classList.add("hidden");
   } else {
-    if (lockScreen) lockScreen.classList.add("hidden");
-    if (appRoot) appRoot.classList.remove("hidden");
-    if (lockBtn) lockBtn.classList.remove("hidden");
+    lockScreen.classList.add("hidden");
+    appRoot.classList.remove("hidden");
+    lockBtn.classList.remove("hidden");
   }
 }
 
@@ -1196,7 +1159,7 @@ function setQuickLastMonth() {
 }
 
 // -------------------------
-// Collect action: placeholder
+// Collect action: trigger Zapier (for SWIIS)
 // -------------------------
 async function triggerZapierCollectAgencyFeeSwiisLastMonth() {
   if (!ZAPIER_CATCH_HOOK_URL || ZAPIER_CATCH_HOOK_URL.includes("PASTE_")) {
@@ -1310,56 +1273,45 @@ async function init() {
   if (testBtn) testBtn.addEventListener("click", sendTestPayloadToZapier);
 
   // Enter = Unlock
-  const pwInput = document.getElementById("pagePassword");
-  if (pwInput) {
-    pwInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        const unlockBtn = document.getElementById("unlockBtn");
-        if (unlockBtn) unlockBtn.click();
-      }
-    });
-  }
+  document.getElementById("pagePassword").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      document.getElementById("unlockBtn").click();
+    }
+  });
 
-  const applyRangeBtn = document.getElementById("applyRange");
-  if (applyRangeBtn) applyRangeBtn.addEventListener("click", applyCustomRangeFromSelectors);
-  const quickThis = document.getElementById("quickThisMonth");
-  if (quickThis) quickThis.addEventListener("change", (e) => { if (e.target.checked) setQuickThisMonth(); });
-  const quickLast = document.getElementById("quickLastMonth");
-  if (quickLast) quickLast.addEventListener("change", (e) => { if (e.target.checked) setQuickLastMonth(); });
+  document.getElementById("applyRange").addEventListener("click", applyCustomRangeFromSelectors);
+  document.getElementById("quickThisMonth").addEventListener("change", (e) => { if (e.target.checked) setQuickThisMonth(); });
+  document.getElementById("quickLastMonth").addEventListener("change", (e) => { if (e.target.checked) setQuickLastMonth(); });
 
-  const lockBtn = document.getElementById("lockBtn");
-  if (lockBtn) lockBtn.addEventListener("click", () => {
+  document.getElementById("lockBtn").addEventListener("click", () => {
     clearEditKey();
     setLockedUI(true);
   });
 
-  const unlockBtn = document.getElementById("unlockBtn");
-  if (unlockBtn) {
-    unlockBtn.addEventListener("click", async () => {
-      const pw = (document.getElementById("pagePassword") || {}).value;
-      const errMount = document.getElementById("lockError");
-      if (errMount) errMount.textContent = "";
+  document.getElementById("unlockBtn").addEventListener("click", async () => {
+    const pw = document.getElementById("pagePassword").value;
+    const errMount = document.getElementById("lockError");
+    errMount.textContent = "";
 
-      try {
-        await attemptUnlock(pw);
-        setLockedUI(false);
+    try {
+      await attemptUnlock(pw);
+      setLockedUI(false);
 
-        if (state.minMonthKey && state.maxMonthKey) {
-          const minY = Number(state.minMonthKey.split("-")[0]);
-          const maxY = Number(state.maxMonthKey.split("-")[0]);
-          fillYearSelect(document.getElementById("startYear"), minY, maxY);
-          fillYearSelect(document.getElementById("endYear"), minY, maxY);
-          fillMonthSelect(document.getElementById("startMonth"));
-          fillMonthSelect(document.getElementById("endMonth"));
-          setRangeSelectorsFromKeys(state.rangeStartKey, state.rangeEndKey);
-        }
-      } catch (err) {
-        clearEditKey();
-        if (errMount) errMount.textContent = `Unlock failed: ${String(err?.message || err)}`;
+      if (state.minMonthKey && state.maxMonthKey) {
+        const minY = Number(state.minMonthKey.split("-")[0]);
+        const maxY = Number(state.maxMonthKey.split("-")[0]);
+        fillYearSelect(document.getElementById("startYear"), minY, maxY);
+        fillYearSelect(document.getElementById("endYear"), minY, maxY);
+        fillMonthSelect(document.getElementById("startMonth"));
+        fillMonthSelect(document.getElementById("endMonth"));
+        setRangeSelectorsFromKeys(state.rangeStartKey, state.rangeEndKey);
       }
-    });
-  }
+    } catch (err) {
+      clearEditKey();
+      errMount.textContent = `Unlock failed: ${String(err?.message || err)}`;
+    }
+  });
 
   setLockedUI(true);
 }
