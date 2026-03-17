@@ -6,30 +6,405 @@
   <link rel="stylesheet" href="assets/style.css" />
   <link rel="icon" href="data:,">
   <title>Competitor Metrics Dashboard</title>
+
   <style>
-    /* (same styles as before - kept concise) */
-    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; padding: 18px; background:#fafafa; color:#111; }
-    .collect-row { margin: 10px 0 12px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-    .collect-row button { padding:8px 12px; border-radius:10px; cursor:pointer; font-weight:700; }
-    #collectDataBtn { background:#ef5d2f; color:#000; border:1px solid #000; }
-    #triggerWorkflowBtn { background:#0b74de; color:#fff; border:1px solid #074a9e; }
-    #testZapBtn { background:#0ea5a4; color:#fff; border:1px solid #065f5b; }
-    .desc { color:#666; font-size:13px; }
+    .hidden { display: none !important; }
+
+    .lockscreen {
+      max-width: 560px;
+      margin: 48px auto;
+      padding: 18px;
+      border: 1px solid #e6e6e6;
+      border-radius: 12px;
+      background: #fff;
+    }
+    .lockscreen input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #d0d0d0;
+      border-radius: 8px;
+      font-size: 14px;
+      margin-top: 8px;
+      box-sizing: border-box;
+    }
+    .lockscreen .actions {
+      margin-top: 12px;
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    .top-info {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+      flex-wrap: wrap;
+    }
+    .top-info .right {
+      white-space: nowrap;
+      opacity: 0.85;
+    }
+
+    /* collect data UI */
+    .collect-row {
+      margin: 10px 0 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+    .collect-row button {
+      padding: 8px 12px;
+      border: 1px solid #d0d0d0;
+      border-radius: 10px;
+      background: #fff;
+      color: #111;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .collect-row button:hover { background: #f3f4f6; }
+    .collect-row .desc {
+      color: #666;
+      font-size: 13px;
+    }
+
+    /* Time-range UI */
+    .range-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .range-box {
+      border: 1px solid #e6e6e6;
+      border-radius: 10px;
+      padding: 10px;
+      background: #fff;
+    }
+    .range-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 6px;
+      align-items: center;
+    }
+    .range-row select {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #d0d0d0;
+      border-radius: 8px;
+      font-size: 14px;
+      box-sizing: border-box;
+      background: #fff;
+    }
+    .quick-row {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      margin-top: 8px;
+      flex-wrap: wrap;
+    }
+    .quick-row label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      user-select: none;
+    }
+
+    /* Minimal modal styles */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.45);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 16px;
+    }
+    .modal {
+      width: min(720px, 100%);
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.25);
+      overflow: hidden;
+    }
+    .modal-header {
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #e6e6e6;
+    }
+    .modal-body { padding: 14px; }
+    .modal-actions {
+      padding: 12px 14px;
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      border-top: 1px solid #e6e6e6;
+      background: #fafafa;
+    }
+    .modal-close {
+      background: transparent;
+      border: 0;
+      font-size: 18px;
+      cursor: pointer;
+      line-height: 1;
+    }
+    .field-row { display: grid; gap: 6px; margin: 10px 0; }
+    .field-row input, .field-row textarea {
+      padding: 10px 12px;
+      border: 1px solid #d0d0d0;
+      border-radius: 8px;
+      font-size: 14px;
+      box-sizing: border-box;
+      width: 100%;
+    }
+
+    .clickable-metric {
+      cursor: pointer;
+      text-decoration: none;
+      text-underline-offset: 2px;
+    }
+    .clickable-metric.muted-cell {
+      text-decoration: none;
+      opacity: 0.85;
+    }
+
+    #metricsDisplay a { text-decoration: none; }
+    #metricsDisplay a:hover { text-decoration: underline; }
+
+    /* Charts */
+    .chart-wrap {
+      margin-top: 14px;
+      border-top: 1px solid #e6e8ee;
+      padding-top: 14px;
+    }
+    .chart-controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+    .chart-controls select {
+      padding: 8px 10px;
+      border: 1px solid #d0d0d0;
+      border-radius: 8px;
+      background: #fff;
+      color: #111 !important;
+      font-size: 14px !important;
+    }
+
+    .chart-downloads {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-left: 8px;
+    }
+
+    .chart-downloads button,
+    .chart-downloads button * {
+      background: #ffffff !important;
+      color: #111111 !important;
+      font-size: 14px !important;
+      font-weight: 700 !important;
+      line-height: 1.2 !important;
+      text-indent: 0 !important;
+      letter-spacing: normal !important;
+      text-transform: none !important;
+
+      border: 1px solid #d0d0d0 !important;
+      border-radius: 8px !important;
+      padding: 6px 10px !important;
+
+      opacity: 1 !important;
+      visibility: visible !important;
+
+      cursor: pointer !important;
+    }
+
+    .chart-downloads button:hover {
+      background: #f3f4f6 !important;
+    }
+
+    canvas { max-width: 100%; }
   </style>
 </head>
-<body>
-  <h1>Competitor Metrics Dashboard</h1>
-  <p id="lastUpdated"></p>
 
-  <div class="collect-row">
-    <button id="collectDataBtn" type="button">Collect data (Zapier)</button>
-    <button id="triggerWorkflowBtn" type="button">Trigger GitHub Action (server)</button>
-    <button id="testZapBtn" type="button">Send test to Zap</button>
-    <span class="desc">Use the blue button to trigger the GitHub Action (safe; no PAT in browser). Use test for Zapier trigger.</span>
+<body>
+  <header class="header">
+    <h1>Competitor Metrics Dashboard</h1>
+
+    <p class="subtle top-info">
+      <span id="lastUpdated"></span>
+      <span id="lastUpdatedAt" class="right"></span>
+    </p>
+
+    <div style="margin-top: 8px;">
+      <button id="lockBtn" type="button" class="hidden">Lock</button>
+    </div>
+  </header>
+
+  <main class="main">
+    <section id="lockScreen" class="lockscreen">
+      <h2>Locked</h2>
+      <p class="muted">Enter the password to access the dashboard.</p>
+
+      <label for="pagePassword" class="subtle">Password</label>
+      <input id="pagePassword" type="password" autocomplete="current-password" />
+
+      <div class="actions">
+        <button id="unlockBtn" type="button">Unlock</button>
+      </div>
+
+      <p id="lockError" class="muted" style="color:#b00020; margin-top: 10px;"></p>
+    </section>
+
+    <section id="appRoot" class="hidden">
+      <section class="controls" id="controls">
+        <div class="control-block">
+          <h2>Time Range</h2>
+          <p class="muted" style="margin-top:-4px;">Choose a custom start/end month, or use quick picks.</p>
+
+          <div class="quick-row">
+            <label><input type="checkbox" id="quickThisMonth" /> This Month</label>
+            <label><input type="checkbox" id="quickLastMonth" /> Last Month</label>
+          </div>
+
+          <div class="range-grid">
+            <div class="range-box">
+              <div style="font-weight:700;">Start</div>
+              <div class="range-row">
+                <select id="startYear"></select>
+                <select id="startMonth"></select>
+              </div>
+            </div>
+
+            <div class="range-box">
+              <div style="font-weight:700;">End</div>
+              <div class="range-row">
+                <select id="endYear"></select>
+                <select id="endMonth"></select>
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top:10px;">
+            <button id="applyRange" type="button">Apply Range</button>
+          </div>
+        </div>
+
+        <div class="control-block">
+          <h2>Companies</h2>
+          <div class="control-actions">
+            <button id="companiesAllOn" type="button">All on</button>
+            <button id="companiesAllOff" type="button">All off</button>
+          </div>
+          <div id="companyToggle" class="toggle-grid"></div>
+        </div>
+
+        <div class="control-block">
+          <h2>Export</h2>
+          <div class="control-actions">
+            <button id="exportCsv" type="button">Download CSV</button>
+            <button id="exportXlsx" type="button">Download Excel (.xlsx)</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Metrics</h2>
+        <p class="muted" style="margin-top:-6px;">
+          Click a number to edit it. Changes save to Xano.
+        </p>
+
+        <!-- NEW: Collect Data button + description -->
+        <div class="collect-row">
+          <button id="collectDataBtn" type="button">Collect data</button>
+          <span class="desc">Click to collect last month’s data.</span>
+        </div>
+
+        <div id="metricsDisplay" class="table-wrap"></div>
+
+        <div class="chart-wrap">
+          <div class="chart-controls">
+            <strong>Chart</strong>
+            <span class="muted" id="chartModeLabel"></span>
+
+            <label class="muted" for="chartMetricSelect" style="margin-left: 10px;">Metric:</label>
+            <select id="chartMetricSelect"></select>
+
+            <div class="chart-downloads" aria-label="Chart downloads">
+              <button id="downloadChartPng" type="button">Download PNG</button>
+              <button id="downloadChartJpg" type="button">Download JPG</button>
+              <button id="downloadChartPdf" type="button">PDF (Print)</button>
+            </div>
+          </div>
+
+          <canvas id="metricChart" height="120"></canvas>
+
+          <p class="muted" style="margin-top: 8px;">
+            Single month: bar chart across companies. Multiple months: line chart over time (one metric).
+          </p>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <div id="editMetricModalBackdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal">
+      <div class="modal-header">
+        <div>
+          <div style="font-weight: 700;">Edit value</div>
+          <div class="subtle" id="editMetricSubtitle" style="margin-top: 2px;"></div>
+        </div>
+        <button class="modal-close" id="editMetricClose" aria-label="Close">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="field-row">
+          <label class="subtle" for="editMetricNewValue">New value</label>
+          <input id="editMetricNewValue" type="number" inputmode="numeric" />
+          <div class="subtle" id="editMetricHint"></div>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button id="editMetricUpdate" type="button">Update</button>
+      </div>
+    </div>
   </div>
 
-  <div id="metricsDisplay">Loading dashboard…</div>
+  <div id="editTextModalBackdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal">
+      <div class="modal-header">
+        <div>
+          <div style="font-weight: 700;">Edit text</div>
+          <div class="subtle" id="editTextSubtitle" style="margin-top: 2px;"></div>
+        </div>
+        <button class="modal-close" id="editTextClose" aria-label="Close">✕</button>
+      </div>
 
+      <div class="modal-body">
+        <div class="field-row">
+          <label class="subtle" for="editTextNewValue">New value</label>
+          <textarea id="editTextNewValue" rows="6" placeholder="Type text..."></textarea>
+          <div class="subtle" id="editTextHint"></div>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button id="editTextUpdate" type="button">Update</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="assets/app.js"></script>
 </body>
 </html>
