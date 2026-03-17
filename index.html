@@ -34,6 +34,7 @@
       justify-content: flex-end;
     }
 
+    /* Viewing info (left) + last updated (right) */
     .top-info {
       display: flex;
       justify-content: space-between;
@@ -46,7 +47,7 @@
       opacity: 0.85;
     }
 
-    /* collect data UI */
+    /* Collect data UI */
     .collect-row {
       margin: 10px 0 12px;
       display: flex;
@@ -54,20 +55,34 @@
       gap: 10px;
       align-items: center;
     }
+
+    /* ORANGE button with black text + black border */
     .collect-row button {
       padding: 8px 12px;
-      border: 1px solid #d0d0d0;
+      border: 1px solid #000000;
       border-radius: 10px;
-      background: #fff;
-      color: #111;
-      font-weight: 700;
+      background: #ef5d2f;
+      color: #000000;
+      font-weight: 800;
       cursor: pointer;
     }
-    .collect-row button:hover { background: #f3f4f6; }
+    .collect-row button:hover { filter: brightness(0.95); }
     .collect-row .desc {
       color: #666;
       font-size: 13px;
     }
+
+    /* Test button style */
+    #testZapBtn {
+      background: #0ea5a4;
+      color: #fff;
+      border: 1px solid #065f5b;
+      padding: 8px 12px;
+      border-radius: 10px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    #testZapBtn:hover { filter: brightness(0.95); }
 
     /* Time-range UI */
     .range-grid {
@@ -112,7 +127,7 @@
       user-select: none;
     }
 
-    /* Minimal modal styles */
+    /* Minimal modal styles (edit number / text) */
     .modal-backdrop {
       position: fixed;
       inset: 0;
@@ -163,6 +178,7 @@
       width: 100%;
     }
 
+    /* remove underlines by default */
     .clickable-metric {
       cursor: pointer;
       text-decoration: none;
@@ -173,6 +189,7 @@
       opacity: 0.85;
     }
 
+    /* Links in metrics: not underlined unless hovered */
     #metricsDisplay a { text-decoration: none; }
     #metricsDisplay a:hover { text-decoration: underline; }
 
@@ -198,6 +215,7 @@
       font-size: 14px !important;
     }
 
+    /* Download buttons */
     .chart-downloads {
       display: inline-flex;
       gap: 8px;
@@ -205,7 +223,6 @@
       flex-wrap: wrap;
       margin-left: 8px;
     }
-
     .chart-downloads button,
     .chart-downloads button * {
       background: #ffffff !important;
@@ -226,7 +243,6 @@
 
       cursor: pointer !important;
     }
-
     .chart-downloads button:hover {
       background: #f3f4f6 !important;
     }
@@ -250,6 +266,7 @@
   </header>
 
   <main class="main">
+    <!-- Locked screen -->
     <section id="lockScreen" class="lockscreen">
       <h2>Locked</h2>
       <p class="muted">Enter the password to access the dashboard.</p>
@@ -264,8 +281,10 @@
       <p id="lockError" class="muted" style="color:#b00020; margin-top: 10px;"></p>
     </section>
 
+    <!-- App -->
     <section id="appRoot" class="hidden">
       <section class="controls" id="controls">
+        <!-- Time Range -->
         <div class="control-block">
           <h2>Time Range</h2>
           <p class="muted" style="margin-top:-4px;">Choose a custom start/end month, or use quick picks.</p>
@@ -322,10 +341,10 @@
           Click a number to edit it. Changes save to Xano.
         </p>
 
-        <!-- NEW: Collect Data button + description -->
         <div class="collect-row">
           <button id="collectDataBtn" type="button">Collect data</button>
-          <span class="desc">Click to collect last month’s data.</span>
+          <button id="testZapBtn" type="button">Send test to Zap</button>
+          <span class="desc">Click to collect last month’s data. Use the test button to send a sample payload to Zapier.</span>
         </div>
 
         <div id="metricsDisplay" class="table-wrap"></div>
@@ -355,6 +374,7 @@
     </section>
   </main>
 
+  <!-- Edit Number Modal -->
   <div id="editMetricModalBackdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-hidden="true">
     <div class="modal">
       <div class="modal-header">
@@ -379,6 +399,7 @@
     </div>
   </div>
 
+  <!-- Shared Edit Text Modal -->
   <div id="editTextModalBackdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-hidden="true">
     <div class="modal">
       <div class="modal-header">
