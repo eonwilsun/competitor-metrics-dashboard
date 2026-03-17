@@ -8,6 +8,17 @@ const EDIT_KEY_NAME = "EDIT_KEY";
 const SESSION_KEY = "cmd.editKey.v1";
 
 // -------------------------
+// Collect button -> Zapier hook (v1)
+// -------------------------
+// This is designed so "Collect data" can eventually trigger multiple collectors.
+// For now, it triggers a Zapier Zap (Catch Hook) that should scrape SWIIS fee page and update Xano.
+//
+// IMPORTANT:
+// - If your GitHub repo is public, anyone can see this URL and trigger the Zap.
+//   Consider using a proxy (Cloudflare Worker) or a secret token in the payload.
+const ZAPIER_CATCH_HOOK_URL = "PASTE_YOUR_ZAPIER_CATCH_HOOK_URL_HERE";
+
+// -------------------------
 // Metrics (table columns)
 // -------------------------
 const METRIC_FIELDS = [
@@ -261,6 +272,12 @@ function previousMonthKeyUTC(monthKey) {
   const dt = new Date(Date.UTC(p.year, Number(p.month) - 1, 1));
   dt.setUTCMonth(dt.getUTCMonth() - 1);
   return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function lastMonthKeyUtcYYYYMM() {
+  // Today is whatever; we compute last month based on UTC calendar month.
+  const thisKey = currentMonthKeyUTC();
+  return previousMonthKeyUTC(thisKey);
 }
 
 // -------------------------
@@ -823,4 +840,536 @@ function buildMetricsTable(visibleMonths, companies) {
         continue;
       }
 
-  (file truncated in assistant message due to length)
+      const isEmpty = displayValue === null || displayValue === undefined || displayValue === "";
+      const span = el("span", {
+        className: `clickable-metric metrics-num${isEmpty ? " muted-cell" : ""}`,
+        text: formatValue(displayValue, f.format),
+        title: singleMonth ? (f.readOnly ? "Derived (edit Images/Reels)" : "Click to edit") : "Averaged across selected months"
+      });
+
+      if (singleMonth && editTargetRow && !f.readOnly) {
+        span.addEventListener("click", () => {
+          openEditMetricModal({
+            row: editTargetRow,
+            fieldKey: f.key,
+            fieldLabel: f.label,
+            currentValue: editTargetRow[f.key],
+            monthKey: editMonthKey
+          });
+        });
+      }
+
+      td.appendChild(span);
+      tr.appendChild(td);
+    }
+
+    // Notes cell
+    const notesTd = el("td");
+    let notesRow = null;
+    let mk = null;
+    if (singleMonth) {
+      mk = visibleMonths[0];
+      notesRow = findRowByCompanyAndMonth(companyName, mk);
+    }
+
+    const notesText = singleMonth ? (notesRow?.[NOTES_FIELD_KEY] ?? "") : "";
+    const notesPreview = normalizeText(notesText) ? linkifyTextToHtml(notesText) : "—";
+
+    const notesDiv = el("div", {
+      className: `clickable-metric metrics-rich${(normalizeText(notesText) ? "" : " muted-cell")}`,
+      html: notesPreview,
+      title: singleMonth ? "Click to edit notes" : "Switch to a single month to edit notes"
+    });
+
+    if (singleMonth && notesRow) {
+      notesDiv.addEventListener("click", (e) => {
+        if (e.target && e.target.closest and e.target.closest("a")) return;
+        openEditNotesModal({ row: notesRow, monthKey: mk });
+      });
+    }
+
+    notesTd.appendChild(notesDiv);
+    tr.appendChild(notesTd);
+
+    tbody.appendChild(tr);
+  }
+
+  table.appendChild(tbody);
+  return table;
+}
+
+// -------------------------
+// Chart.js
+// -------------------------
+let metricChart = null;
+
+function getNumericMetricValue(row, metricKey) {
+  if (!row) return null;
+  if (metricKey === "number_of_monthly_instagram_posts") return extractPostsTotal(row.number_of_monthly_instagram_posts);
+  if (metricKey === "monthly_instagram_engagement") return extractEngagementTotal(row.monthly_instagram_engagement);
+  return toNumberOrNull(row[metricKey]);
+}
+
+function ensureChartMetricOptions(force = false) {
+  const sel = document.getElementById("chartMetricSelect");
+  if (!sel) return;
+
+  if (force || sel.options.length === 0) {
+    const prev = sel.value;
+    sel.innerHTML = "";
+    for (const m of CHART_METRICS) {
+      const opt = document.createElement("option");
+      opt.value = m.key;
+      opt.textContent = m.label;
+      sel.appendChild(opt);
+    }
+    const want = prev && CHART_METRICS.some(x => x.key === prev) ? prev : (CHART_METRICS[0]?.key || "");
+    if (want) sel.value = want;
+  }
+}
+
+function destroyChart() {
+  if (metricChart) {
+    metricChart.destroy();
+    metricChart = null;
+  }
+}
+
+function renderChart() {
+  const canvas = document.getElementById("metricChart");
+  const sel = document.getElementById("chartMetricSelect");
+  const modeLabel = document.getElementById("chartModeLabel");
+  if (!canvas || !sel || typeof Chart === "undefined") return;
+
+  if (sel.options.length === 0) ensureChartMetricOptions(true);
+
+  const metricKey = sel.value;
+  if (!metricKey) return;
+
+  const metricLabel = CHART_METRICS.find(m => m.key === metricKey)?.label || metricKey;
+
+  const visibleMonths = state.visibleMonths.length ? state.visibleMonths : (state.latestMonthKey ? [state.latestMonthKey] : []);
+  if (!visibleMonths.length) return;
+
+  const singleMonth = visibleMonths.length === 1;
+  const companies = uniqueCompanies(state.rows).filter(c => state.selectedCompanies.has(c));
+
+  if (modeLabel) {
+    modeLabel.textContent = singleMonth
+      ? `(Bar • ${visibleMonths[0]})`
+      : `(Line • ${visibleMonths[0]} → ${visibleMonths[visibleMonths.length - 1]})`;
+  }
+
+  destroyChart();
+
+  if (singleMonth) {
+    const mk = visibleMonths[0];
+    const values = companies.map(c => getNumericMetricValue(findRowByCompanyAndMonth(c, mk), metricKey) ?? 0);
+    const colors = companies.map(companyColor);
+
+    metricChart = new Chart(canvas, {
+      type: "bar",
+      data: {
+        labels: companies,
+        datasets: [{
+          label: metricLabel,
+          data: values,
+          backgroundColor: colors
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: true } },
+        scales: { y: { beginAtZero: true } }
+      }
+    });
+  } else {
+    const datasets = companies.map((c) => {
+      const data = visibleMonths.map(mk => getNumericMetricValue(findRowByCompanyAndMonth(c, mk), metricKey) ?? 0);
+      const color = companyColor(c);
+      return {
+        label: c,
+        data,
+        tension: 0.25,
+        borderColor: color,
+        backgroundColor: color
+      };
+    });
+
+    metricChart = new Chart(canvas, {
+      type: "line",
+      data: { labels: visibleMonths, datasets },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: true } },
+        scales: { y: { beginAtZero: true } }
+      }
+    });
+  }
+}
+
+// -------------------------
+// Styling
+// -------------------------
+function applyMetricsTableStyling() {
+  const root = document.getElementById("metricsDisplay");
+  const table = root?.querySelector("table");
+  if (!table) return;
+
+  root.querySelectorAll(".clickable-metric").forEach((n) => {
+    n.style.textDecoration = "none";
+  });
+
+  table.querySelectorAll("td").forEach((td) => {
+    td.style.textAlign = "center";
+    td.style.verticalAlign = "middle";
+  });
+
+  table.querySelectorAll("tr").forEach((tr) => {
+    const tds = tr.querySelectorAll("td");
+    if (tds[0]) tds[0].style.textAlign = "left";
+    if (tds[1]) tds[1].style.textAlign = "left";
+  });
+
+  table.querySelectorAll("td").forEach((td) => {
+    if (td.querySelector(".metrics-rich")) td.style.textAlign = "left";
+  });
+}
+
+// -------------------------
+// Refresh / reload
+// -------------------------
+function refresh() {
+  const mount = document.getElementById("metricsDisplay");
+  mount.innerHTML = "";
+
+  if (!state.latestMonthKey) {
+    mount.appendChild(el("p", { className: "muted", text: "No data found in Xano." }));
+    destroyChart();
+    return;
+  }
+
+  const visibleMonths = state.visibleMonths.length ? state.visibleMonths : [state.latestMonthKey];
+  const selected = uniqueCompanies(state.rows).filter(c => state.selectedCompanies.has(c));
+
+  document.getElementById("lastUpdated").textContent =
+    `Loaded from Xano. Latest month in Xano: ${state.latestMonthKey}. Viewing: ${visibleMonths.join(", ")}.`;
+  setLastUpdatedAtText();
+
+  if (!selected.length) {
+    mount.appendChild(el("p", { className: "muted", text: "No companies selected." }));
+    destroyChart();
+    return;
+  }
+
+  mount.appendChild(buildMetricsTable(visibleMonths, selected));
+  ensureChartMetricOptions(false);
+  renderChart();
+  applyMetricsTableStyling();
+}
+
+async function reloadFromXanoAndRefresh() {
+  const rows = await xanoFetch(XANO_TABLE_PATH, { method: "GET", withEditKey: false });
+  const raw = Array.isArray(rows) ? rows : (rows?.items || rows?.data || []);
+  state.rows = raw.map(normalizeRow);
+
+  state.latestMonthKey = computeLatestMonthKey(state.rows);
+  const { min, max } = computeMinMaxMonthKey(state.rows);
+  state.minMonthKey = min;
+  state.maxMonthKey = max;
+
+  state.lastLoadedAtUtc = new Date();
+
+  const companies = uniqueCompanies(state.rows);
+  if (state.selectedCompanies.size === 0) companies.forEach(c => state.selectedCompanies.add(c));
+  else for (const c of Array.from(state.selectedCompanies)) if (!companies.includes(c)) state.selectedCompanies.delete(c);
+
+  renderCompanyToggles(companies);
+
+  if (!state.visibleMonths.length) {
+    const defaultKey = state.latestMonthKey;
+    state.visibleMonths = [defaultKey];
+    state.rangeStartKey = defaultKey;
+    state.rangeEndKey = defaultKey;
+  }
+
+  ensureChartMetricOptions(true);
+  refresh();
+}
+
+function setLockedUI(locked) {
+  const lockScreen = document.getElementById("lockScreen");
+  const appRoot = document.getElementById("appRoot");
+  const lockBtn = document.getElementById("lockBtn");
+  if (locked) {
+    if (lockScreen) lockScreen.classList.remove("hidden");
+    if (appRoot) appRoot.classList.add("hidden");
+    if (lockBtn) lockBtn.classList.add("hidden");
+  } else {
+    if (lockScreen) lockScreen.classList.add("hidden");
+    if (appRoot) appRoot.classList.remove("hidden");
+    if (lockBtn) lockBtn.classList.remove("hidden");
+  }
+}
+
+async function attemptUnlock(password) {
+  setEditKey(password);
+  const ok = await verifyPassword(password);
+  if (!ok) {
+    clearEditKey();
+    throw new Error("Incorrect password.");
+  }
+  await reloadFromXanoAndRefresh();
+}
+
+// time range UI
+function fillMonthSelect(selectEl) {
+  selectEl.innerHTML = "";
+  for (const m of MONTH_LABELS) {
+    const opt = document.createElement("option");
+    opt.value = m.value;
+    opt.textContent = m.name;
+    selectEl.appendChild(opt);
+  }
+}
+
+function fillYearSelect(selectEl, minYear, maxYear) {
+  selectEl.innerHTML = "";
+  for (let y = minYear; y <= maxYear; y++) {
+    const opt = document.createElement("option");
+    opt.value = String(y);
+    opt.textContent = String(y);
+    selectEl.appendChild(opt);
+  }
+}
+
+function setRangeSelectorsFromKeys(startKey, endKey) {
+  const s = parseMonthKey(startKey);
+  const e = parseMonthKey(endKey);
+  if (!s || !e) return;
+  document.getElementById("startYear").value = String(s.year);
+  document.getElementById("startMonth").value = s.month;
+  document.getElementById("endYear").value = String(e.year);
+  document.getElementById("endMonth").value = e.month;
+}
+
+function applyCustomRangeFromSelectors() {
+  const startKey = monthKeyFromYYYYMMParts(
+    document.getElementById("startYear").value,
+    document.getElementById("startMonth").value
+  );
+  const endKey = monthKeyFromYYYYMMParts(
+    document.getElementById("endYear").value,
+    document.getElementById("endMonth").value
+  );
+  if (compareMonthKey(startKey, endKey) > 0) return alert("Start month must be before (or the same as) End month.");
+
+  document.getElementById("quickThisMonth").checked = false;
+  document.getElementById("quickLastMonth").checked = false;
+
+  state.rangeStartKey = startKey;
+  state.rangeEndKey = endKey;
+  state.visibleMonths = listMonthKeysBetween(startKey, endKey);
+
+  refresh();
+}
+
+function setQuickThisMonth() {
+  document.getElementById("quickLastMonth").checked = false;
+  const key = currentMonthKeyUTC();
+  state.rangeStartKey = key;
+  state.rangeEndKey = key;
+  state.visibleMonths = [key];
+  setRangeSelectorsFromKeys(key, key);
+  refresh();
+}
+
+function setQuickLastMonth() {
+  document.getElementById("quickThisMonth").checked = false;
+  const thisKey = currentMonthKeyUTC();
+  const lastKey = previousMonthKeyUTC(thisKey);
+  state.rangeStartKey = lastKey;
+  state.rangeEndKey = lastKey;
+  state.visibleMonths = [lastKey];
+  setRangeSelectorsFromKeys(lastKey, lastKey);
+  refresh();
+}
+
+// -------------------------
+// Collect action: placeholder
+// -------------------------
+async function triggerZapierCollectAgencyFeeSwiisLastMonth() {
+  if (!ZAPIER_CATCH_HOOK_URL || ZAPIER_CATCH_HOOK_URL.includes("PASTE_")) {
+    throw new Error("Missing ZAPIER_CATCH_HOOK_URL in assets/app.js");
+  }
+
+  const payload = {
+    action: "collect_agency_fees",
+    company: "SWIIS",
+    month_key: lastMonthKeyUtcYYYYMM(),
+    source_url: "https://www.swiisfostercare.com/fostering/fostering-allowance-pay/"
+  };
+
+  const res = await fetch(ZAPIER_CATCH_HOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new Error(`Zapier hook failed (${res.status}): ${t || res.statusText}`);
+  }
+}
+
+// -------------------------
+// Test button: send sample payload to Zapier
+// -------------------------
+async function sendTestPayloadToZapier() {
+  if (!ZAPIER_CATCH_HOOK_URL || ZAPIER_CATCH_HOOK_URL.includes("PASTE_")) {
+    alert("Missing ZAPIER_CATCH_HOOK_URL in app.js. Paste the Zapier hook URL into the constant.");
+    return;
+  }
+
+  const monthKey = lastMonthKeyUtcYYYYMM(); // e.g. "2026-02"
+  const payload = {
+    secret: "swiissecret",
+    month_key: monthKey,
+    action: "collect_agency_fees",
+    company: "SWIIS",
+    source_url: "https://www.swiisfostercare.com/fostering/fostering-allowance-pay/"
+  };
+
+  const btn = document.getElementById("testZapBtn");
+  const prevText = btn ? btn.textContent : null;
+  try {
+    if (btn) { btn.disabled = true; btn.textContent = "Sending test..."; }
+
+    const res = await fetch(ZAPIER_CATCH_HOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      throw new Error(`Hook returned ${res.status}: ${txt || res.statusText}`);
+    }
+
+    alert("Test payload sent. Check your Zapier trigger panel for the received data.");
+    console.log("Zapier test payload sent:", payload);
+  } catch (err) {
+    alert("Test failed: " + String(err?.message || err));
+    console.error(err);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = prevText; }
+  }
+}
+
+// -------------------------
+// Init
+// -------------------------
+async function init() {
+  wireEditModals();
+  ensureChartMetricOptions(true);
+  wireChartDownloadButtons();
+
+  const chartSelect = document.getElementById("chartMetricSelect");
+  if (chartSelect) chartSelect.addEventListener("change", renderChart);
+
+  // Collect data button
+  const collectBtn = document.getElementById("collectDataBtn");
+  if (collectBtn) {
+    collectBtn.addEventListener("click", async () => {
+      const prevText = collectBtn.textContent;
+
+      try {
+        collectBtn.disabled = true;
+        collectBtn.textContent = "Collecting...";
+
+        // v1: trigger Zapier to scrape SWIIS agency fee and write back to Xano
+        await triggerZapierCollectAgencyFeeSwiisLastMonth();
+
+        // give Zapier some time to run then refresh
+        setTimeout(async () => {
+          try { await reloadFromXanoAndRefresh(); } catch (e) { console.warn(e); }
+        }, 15000);
+
+        alert("Collect started. Wait ~10–60 seconds, then your dashboard will refresh.");
+      } catch (err) {
+        alert(String(err?.message || err));
+      } finally {
+        collectBtn.disabled = false;
+        collectBtn.textContent = prevText;
+      }
+    });
+  }
+
+  // Test Zap button wiring
+  const testBtn = document.getElementById("testZapBtn");
+  if (testBtn) testBtn.addEventListener("click", sendTestPayloadToZapier);
+
+  // Enter = Unlock
+  const pwInput = document.getElementById("pagePassword");
+  if (pwInput) {
+    pwInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const unlockBtn = document.getElementById("unlockBtn");
+        if (unlockBtn) unlockBtn.click();
+      }
+    });
+  }
+
+  const applyRangeBtn = document.getElementById("applyRange");
+  if (applyRangeBtn) applyRangeBtn.addEventListener("click", applyCustomRangeFromSelectors);
+  const quickThis = document.getElementById("quickThisMonth");
+  if (quickThis) quickThis.addEventListener("change", (e) => { if (e.target.checked) setQuickThisMonth(); });
+  const quickLast = document.getElementById("quickLastMonth");
+  if (quickLast) quickLast.addEventListener("change", (e) => { if (e.target.checked) setQuickLastMonth(); });
+
+  const lockBtn = document.getElementById("lockBtn");
+  if (lockBtn) lockBtn.addEventListener("click", () => {
+    clearEditKey();
+    setLockedUI(true);
+  });
+
+  const unlockBtn = document.getElementById("unlockBtn");
+  if (unlockBtn) {
+    unlockBtn.addEventListener("click", async () => {
+      const pw = (document.getElementById("pagePassword") || {}).value;
+      const errMount = document.getElementById("lockError");
+      if (errMount) errMount.textContent = "";
+
+      try {
+        await attemptUnlock(pw);
+        setLockedUI(false);
+
+        if (state.minMonthKey && state.maxMonthKey) {
+          const minY = Number(state.minMonthKey.split("-")[0]);
+          const maxY = Number(state.maxMonthKey.split("-")[0]);
+          fillYearSelect(document.getElementById("startYear"), minY, maxY);
+          fillYearSelect(document.getElementById("endYear"), minY, maxY);
+          fillMonthSelect(document.getElementById("startMonth"));
+          fillMonthSelect(document.getElementById("endMonth"));
+          setRangeSelectorsFromKeys(state.rangeStartKey, state.rangeEndKey);
+        }
+      } catch (err) {
+        clearEditKey();
+        if (errMount) errMount.textContent = `Unlock failed: ${String(err?.message || err)}`;
+      }
+    });
+  }
+
+  setLockedUI(true);
+}
+
+function showFatal(err) {
+  console.error(err);
+  const lockErr = document.getElementById("lockError");
+  if (lockErr) lockErr.textContent = String(err?.stack || err);
+}
+
+window.addEventListener("DOMContentLoaded", () => {
+  init().catch(showFatal);
+});
