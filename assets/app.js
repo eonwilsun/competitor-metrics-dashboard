@@ -1,22 +1,40 @@
 // -------------------------
-// Xano config
+// Runtime + Xano & Zapier config
 // -------------------------
-const XANO_BASE_URL = "https://x8ki-letl-twmt.n7.xano.io/api:ZvixoXZ8";
+const DEFAULT_XANO_BASE_URL = "https://x8ki-letl-twmt.n7.xano.io/api:ZvixoXZ8";
+const XANO_BASE_URL = (typeof window !== "undefined" && window.APP_CONFIG && window.APP_CONFIG.XANO_BASE_URL)
+  ? window.APP_CONFIG.XANO_BASE_URL
+  : DEFAULT_XANO_BASE_URL;
+
 const XANO_TABLE_PATH = "/competitor_metrics_dashboard2";
 const XANO_CONFIG_PATH = "/app_config";
 const EDIT_KEY_NAME = "EDIT_KEY";
 const SESSION_KEY = "cmd.editKey.v1";
 
-// -------------------------
-// Collect button -> Zapier hook (v1)
-// -------------------------
-// This is designed so "Collect data" can eventually trigger multiple collectors.
-// For now, it triggers a Zapier Zap (Catch Hook) that should scrape SWIIS fee page and update Xano.
-//
-// IMPORTANT:
-// - If your GitHub repo is public, anyone can see this URL and trigger the Zap.
-//   Consider using a proxy (Cloudflare Worker) or a secret token in the payload.
-const ZAPIER_CATCH_HOOK_URL = "PASTE_YOUR_ZAPIER_CATCH_HOOK_URL_HERE";
+// Resolve Zapier hook at runtime: window.APP_CONFIG -> sessionStorage -> null
+function getZapierHook() {
+  try {
+    if (typeof window !== "undefined" && window.APP_CONFIG && window.APP_CONFIG.ZAPIER_CATCH_HOOK_URL) {
+      const v = String(window.APP_CONFIG.ZAPIER_CATCH_HOOK_URL || "").trim();
+      if (v) return v;
+    }
+  } catch (e) { /* ignore */ }
+
+  try {
+    const s = sessionStorage.getItem("ZAPIER_CATCH_HOOK_URL");
+    if (s && String(s).trim()) return String(s).trim();
+  } catch (e) { /* ignore */ }
+
+  return null;
+}
+
+// Helper to set a Zapier hook for the browser session (useful for local testing).
+function setZapierHookForSession(url) {
+  try {
+    if (!url) { sessionStorage.removeItem("ZAPIER_CATCH_HOOK_URL"); return; }
+    sessionStorage.setItem("ZAPIER_CATCH_HOOK_URL", String(url).trim());
+  } catch (e) { /* ignore */ }
+}
 
 // -------------------------
 // Metrics (table columns)
@@ -275,7 +293,6 @@ function previousMonthKeyUTC(monthKey) {
 }
 
 function lastMonthKeyUtcYYYYMM() {
-  // Today is whatever; we compute last month based on UTC calendar month.
   const thisKey = currentMonthKeyUTC();
   return previousMonthKeyUTC(thisKey);
 }
@@ -536,21 +553,27 @@ function openEditMetricModal({ row, fieldKey, fieldLabel, currentValue, monthKey
   editModalState = { row, fieldKey, monthKey };
 
   const backdrop = document.getElementById("editMetricModalBackdrop");
-  document.getElementById("editMetricSubtitle").textContent = `${row.company} • ${monthKey} • ${fieldLabel}`;
-  document.getElementById("editMetricHint").textContent = "This updates the value in Xano.";
+  const subtitle = document.getElementById("editMetricSubtitle");
+  const hint = document.getElementById("editMetricHint");
+  if (subtitle) subtitle.textContent = `${row.company} • ${monthKey} • ${fieldLabel}`;
+  if (hint) hint.textContent = "This updates the value in Xano.";
 
   const input = document.getElementById("editMetricNewValue");
-  input.value = (currentValue === null || currentValue === undefined) ? "" : String(currentValue);
+  if (input) input.value = (currentValue === null || currentValue === undefined) ? "" : String(currentValue);
 
-  backdrop.style.display = "flex";
-  backdrop.setAttribute("aria-hidden", "false");
-  setTimeout(() => input.focus(), 0);
+  if (backdrop) {
+    backdrop.style.display = "flex";
+    backdrop.setAttribute("aria-hidden", "false");
+  }
+  setTimeout(() => input && input.focus(), 0);
 }
 
 function closeEditMetricModal() {
   const backdrop = document.getElementById("editMetricModalBackdrop");
-  backdrop.style.display = "none";
-  backdrop.setAttribute("aria-hidden", "true");
+  if (backdrop) {
+    backdrop.style.display = "none";
+    backdrop.setAttribute("aria-hidden", "true");
+  }
   editModalState = null;
 }
 
@@ -558,71 +581,93 @@ function openEditTextModal({ row, fieldKey, fieldLabel, currentValue, monthKey }
   editTextModalState = { row, fieldKey, monthKey };
 
   const backdrop = document.getElementById("editTextModalBackdrop");
-  document.getElementById("editTextSubtitle").textContent = `${row.company} • ${monthKey} • ${fieldLabel}`;
-  document.getElementById("editTextHint").textContent = "Multiple lines supported. Ctrl+Enter saves.";
+  const subtitle = document.getElementById("editTextSubtitle");
+  const hint = document.getElementById("editTextHint");
+  if (subtitle) subtitle.textContent = `${row.company} • ${monthKey} • ${fieldLabel}`;
+  if (hint) hint.textContent = "Multiple lines supported. Ctrl+Enter saves.";
 
   const textarea = document.getElementById("editTextNewValue");
-  textarea.value = (currentValue === null || currentValue === undefined) ? "" : String(currentValue);
+  if (textarea) textarea.value = (currentValue === null || currentValue === undefined) ? "" : String(currentValue);
 
-  document.getElementById("editTextUpdate").dataset.mode = "press";
+  const updateBtn = document.getElementById("editTextUpdate");
+  if (updateBtn) updateBtn.dataset.mode = "press";
 
-  backdrop.style.display = "flex";
-  backdrop.setAttribute("aria-hidden", "false");
-  setTimeout(() => textarea.focus(), 0);
+  if (backdrop) {
+    backdrop.style.display = "flex";
+    backdrop.setAttribute("aria-hidden", "false");
+  }
+  setTimeout(() => textarea && textarea.focus(), 0);
 }
 
 function openEditNotesModal({ row, monthKey }) {
   editNotesModalState = { row, monthKey };
 
   const backdrop = document.getElementById("editTextModalBackdrop");
-  document.getElementById("editTextSubtitle").textContent = `${row.company} • ${monthKey} • Notes`;
-  document.getElementById("editTextHint").textContent = "Edit notes (multi-line). Ctrl+Enter saves.";
+  const subtitle = document.getElementById("editTextSubtitle");
+  const hint = document.getElementById("editTextHint");
+  if (subtitle) subtitle.textContent = `${row.company} • ${monthKey} • Notes`;
+  if (hint) hint.textContent = "Edit notes (multi-line). Ctrl+Enter saves.";
 
   const textarea = document.getElementById("editTextNewValue");
-  textarea.value = row?.[NOTES_FIELD_KEY] ?? "";
+  if (textarea) textarea.value = row?.[NOTES_FIELD_KEY] ?? "";
 
-  document.getElementById("editTextUpdate").dataset.mode = "notes";
+  const updateBtn = document.getElementById("editTextUpdate");
+  if (updateBtn) updateBtn.dataset.mode = "notes";
 
-  backdrop.style.display = "flex";
-  backdrop.setAttribute("aria-hidden", "false");
-  setTimeout(() => textarea.focus(), 0);
+  if (backdrop) {
+    backdrop.style.display = "flex";
+    backdrop.setAttribute("aria-hidden", "false");
+  }
+  setTimeout(() => textarea && textarea.focus(), 0);
 }
 
 function closeEditTextModal() {
   const backdrop = document.getElementById("editTextModalBackdrop");
-  backdrop.style.display = "none";
-  backdrop.setAttribute("aria-hidden", "true");
+  if (backdrop) {
+    backdrop.style.display = "none";
+    backdrop.setAttribute("aria-hidden", "true");
+  }
   editTextModalState = null;
   editNotesModalState = null;
-  document.getElementById("editTextUpdate").dataset.mode = "";
+  const updateBtn = document.getElementById("editTextUpdate");
+  if (updateBtn) updateBtn.dataset.mode = "";
 }
 
 function wireEditModals() {
-  document.getElementById("editMetricClose").addEventListener("click", closeEditMetricModal);
-  document.getElementById("editMetricModalBackdrop").addEventListener("click", (e) => {
+  const metricClose = document.getElementById("editMetricClose");
+  if (metricClose) metricClose.addEventListener("click", closeEditMetricModal);
+  const metricBackdrop = document.getElementById("editMetricModalBackdrop");
+  if (metricBackdrop) metricBackdrop.addEventListener("click", (e) => {
     if (e.target.id === "editMetricModalBackdrop") closeEditMetricModal();
   });
 
-  document.getElementById("editTextClose").addEventListener("click", closeEditTextModal);
-  document.getElementById("editTextModalBackdrop").addEventListener("click", (e) => {
+  const textClose = document.getElementById("editTextClose");
+  if (textClose) textClose.addEventListener("click", closeEditTextModal);
+  const textBackdrop = document.getElementById("editTextModalBackdrop");
+  if (textBackdrop) textBackdrop.addEventListener("click", (e) => {
     if (e.target.id === "editTextModalBackdrop") closeEditTextModal();
   });
 
-  document.getElementById("editMetricNewValue").addEventListener("keydown", (e) => {
+  const metricInput = document.getElementById("editMetricNewValue");
+  if (metricInput) metricInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
-      document.getElementById("editMetricUpdate").click();
+      const btn = document.getElementById("editMetricUpdate");
+      if (btn) btn.click();
     }
   });
 
-  document.getElementById("editTextNewValue").addEventListener("keydown", (e) => {
+  const textArea = document.getElementById("editTextNewValue");
+  if (textArea) textArea.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
-      document.getElementById("editTextUpdate").click();
+      const btn = document.getElementById("editTextUpdate");
+      if (btn) btn.click();
     }
   });
 
-  document.getElementById("editMetricUpdate").addEventListener("click", async () => {
+  const metricUpdateBtn = document.getElementById("editMetricUpdate");
+  if (metricUpdateBtn) metricUpdateBtn.addEventListener("click", async () => {
     if (!editModalState) return;
 
     const btn = document.getElementById("editMetricUpdate");
@@ -663,10 +708,11 @@ function wireEditModals() {
     }
   });
 
-  document.getElementById("editTextUpdate").addEventListener("click", async () => {
-    const mode = document.getElementById("editTextUpdate").dataset.mode || "";
-    const btn = document.getElementById("editTextUpdate");
-    const val = document.getElementById("editTextNewValue").value;
+  const textUpdateBtn = document.getElementById("editTextUpdate");
+  if (textUpdateBtn) textUpdateBtn.addEventListener("click", async () => {
+    const mode = textUpdateBtn.dataset.mode || "";
+    const btn = textUpdateBtn;
+    const val = (document.getElementById("editTextNewValue") || {}).value;
     const payloadVal = (val === "" ? null : val);
 
     try {
@@ -1000,7 +1046,7 @@ function applyMetricsTableStyling() {
 }
 
 // -------------------------
-// Refresh / reload
+// Refresh / load / init
 // -------------------------
 function refresh() {
   const mount = document.getElementById("metricsDisplay");
@@ -1085,85 +1131,13 @@ async function attemptUnlock(password) {
   await reloadFromXanoAndRefresh();
 }
 
-// time range UI
-function fillMonthSelect(selectEl) {
-  selectEl.innerHTML = "";
-  for (const m of MONTH_LABELS) {
-    const opt = document.createElement("option");
-    opt.value = m.value;
-    opt.textContent = m.name;
-    selectEl.appendChild(opt);
-  }
-}
-
-function fillYearSelect(selectEl, minYear, maxYear) {
-  selectEl.innerHTML = "";
-  for (let y = minYear; y <= maxYear; y++) {
-    const opt = document.createElement("option");
-    opt.value = String(y);
-    opt.textContent = String(y);
-    selectEl.appendChild(opt);
-  }
-}
-
-function setRangeSelectorsFromKeys(startKey, endKey) {
-  const s = parseMonthKey(startKey);
-  const e = parseMonthKey(endKey);
-  if (!s || !e) return;
-  document.getElementById("startYear").value = String(s.year);
-  document.getElementById("startMonth").value = s.month;
-  document.getElementById("endYear").value = String(e.year);
-  document.getElementById("endMonth").value = e.month;
-}
-
-function applyCustomRangeFromSelectors() {
-  const startKey = monthKeyFromYYYYMMParts(
-    document.getElementById("startYear").value,
-    document.getElementById("startMonth").value
-  );
-  const endKey = monthKeyFromYYYYMMParts(
-    document.getElementById("endYear").value,
-    document.getElementById("endMonth").value
-  );
-  if (compareMonthKey(startKey, endKey) > 0) return alert("Start month must be before (or the same as) End month.");
-
-  document.getElementById("quickThisMonth").checked = false;
-  document.getElementById("quickLastMonth").checked = false;
-
-  state.rangeStartKey = startKey;
-  state.rangeEndKey = endKey;
-  state.visibleMonths = listMonthKeysBetween(startKey, endKey);
-
-  refresh();
-}
-
-function setQuickThisMonth() {
-  document.getElementById("quickLastMonth").checked = false;
-  const key = currentMonthKeyUTC();
-  state.rangeStartKey = key;
-  state.rangeEndKey = key;
-  state.visibleMonths = [key];
-  setRangeSelectorsFromKeys(key, key);
-  refresh();
-}
-
-function setQuickLastMonth() {
-  document.getElementById("quickThisMonth").checked = false;
-  const thisKey = currentMonthKeyUTC();
-  const lastKey = previousMonthKeyUTC(thisKey);
-  state.rangeStartKey = lastKey;
-  state.rangeEndKey = lastKey;
-  state.visibleMonths = [lastKey];
-  setRangeSelectorsFromKeys(lastKey, lastKey);
-  refresh();
-}
-
 // -------------------------
 // Collect action: trigger Zapier (for SWIIS)
 // -------------------------
 async function triggerZapierCollectAgencyFeeSwiisLastMonth() {
-  if (!ZAPIER_CATCH_HOOK_URL || ZAPIER_CATCH_HOOK_URL.includes("PASTE_")) {
-    throw new Error("Missing ZAPIER_CATCH_HOOK_URL in assets/app.js");
+  const hook = getZapierHook();
+  if (!hook) {
+    throw new Error("Missing ZAPIER_CATCH_HOOK_URL. Configure assets/config.js or set sessionStorage key 'ZAPIER_CATCH_HOOK_URL'.");
   }
 
   const payload = {
@@ -1173,7 +1147,7 @@ async function triggerZapierCollectAgencyFeeSwiisLastMonth() {
     source_url: "https://www.swiisfostercare.com/fostering/fostering-allowance-pay/"
   };
 
-  const res = await fetch(ZAPIER_CATCH_HOOK_URL, {
+  const res = await fetch(hook, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
@@ -1189,12 +1163,27 @@ async function triggerZapierCollectAgencyFeeSwiisLastMonth() {
 // Test button: send sample payload to Zapier
 // -------------------------
 async function sendTestPayloadToZapier() {
-  if (!ZAPIER_CATCH_HOOK_URL || ZAPIER_CATCH_HOOK_URL.includes("PASTE_")) {
-    alert("Missing ZAPIER_CATCH_HOOK_URL in app.js. Paste the Zapier hook URL into the constant.");
-    return;
+  let hook = getZapierHook();
+
+  if (!hook) {
+    const doPrompt = confirm(
+      "No Zapier hook is configured for this site. Would you like to enter a Zapier Catch Hook URL for this browser session? " +
+      "This will be stored only in your browser session and not committed to the repo."
+    );
+    if (!doPrompt) {
+      alert("Missing ZAPIER_CATCH_HOOK_URL. Add it to assets/config.js or use sessionStorage.");
+      return;
+    }
+    const entered = prompt("Paste your Zapier Catch Hook URL here (example: https://hooks.zapier.com/hooks/catch/12345/abcdef):");
+    if (!entered || !entered.trim()) {
+      alert("No URL entered — aborting.");
+      return;
+    }
+    hook = entered.trim();
+    try { sessionStorage.setItem("ZAPIER_CATCH_HOOK_URL", hook); } catch (e) { /* ignore */ }
   }
 
-  const monthKey = lastMonthKeyUtcYYYYMM(); // e.g. "2026-02"
+  const monthKey = lastMonthKeyUtcYYYYMM();
   const payload = {
     secret: "swiissecret",
     month_key: monthKey,
@@ -1208,7 +1197,7 @@ async function sendTestPayloadToZapier() {
   try {
     if (btn) { btn.disabled = true; btn.textContent = "Sending test..."; }
 
-    const res = await fetch(ZAPIER_CATCH_HOOK_URL, {
+    const res = await fetch(hook, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
@@ -1273,45 +1262,56 @@ async function init() {
   if (testBtn) testBtn.addEventListener("click", sendTestPayloadToZapier);
 
   // Enter = Unlock
-  document.getElementById("pagePassword").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      document.getElementById("unlockBtn").click();
-    }
-  });
+  const pwInput = document.getElementById("pagePassword");
+  if (pwInput) {
+    pwInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const unlockBtn = document.getElementById("unlockBtn");
+        if (unlockBtn) unlockBtn.click();
+      }
+    });
+  }
 
-  document.getElementById("applyRange").addEventListener("click", applyCustomRangeFromSelectors);
-  document.getElementById("quickThisMonth").addEventListener("change", (e) => { if (e.target.checked) setQuickThisMonth(); });
-  document.getElementById("quickLastMonth").addEventListener("change", (e) => { if (e.target.checked) setQuickLastMonth(); });
+  const applyRangeBtn = document.getElementById("applyRange");
+  if (applyRangeBtn) applyRangeBtn.addEventListener("click", applyCustomRangeFromSelectors);
+  const quickThis = document.getElementById("quickThisMonth");
+  if (quickThis) quickThis.addEventListener("change", (e) => { if (e.target.checked) setQuickThisMonth(); });
+  const quickLast = document.getElementById("quickLastMonth");
+  if (quickLast) quickLast.addEventListener("change", (e) => { if (e.target.checked) setQuickLastMonth(); });
 
-  document.getElementById("lockBtn").addEventListener("click", () => {
+  const lockBtn = document.getElementById("lockBtn");
+  if (lockBtn) lockBtn.addEventListener("click", () => {
     clearEditKey();
     setLockedUI(true);
   });
 
-  document.getElementById("unlockBtn").addEventListener("click", async () => {
-    const pw = document.getElementById("pagePassword").value;
-    const errMount = document.getElementById("lockError");
-    errMount.textContent = "";
+  const unlockBtn = document.getElementById("unlockBtn");
+  if (unlockBtn) {
+    unlockBtn.addEventListener("click", async () => {
+      const pw = (document.getElementById("pagePassword") || {}).value;
+      const errMount = document.getElementById("lockError");
+      if (errMount) errMount.textContent = "";
 
-    try {
-      await attemptUnlock(pw);
-      setLockedUI(false);
+      try {
+        await attemptUnlock(pw);
+        setLockedUI(false);
 
-      if (state.minMonthKey && state.maxMonthKey) {
-        const minY = Number(state.minMonthKey.split("-")[0]);
-        const maxY = Number(state.maxMonthKey.split("-")[0]);
-        fillYearSelect(document.getElementById("startYear"), minY, maxY);
-        fillYearSelect(document.getElementById("endYear"), minY, maxY);
-        fillMonthSelect(document.getElementById("startMonth"));
-        fillMonthSelect(document.getElementById("endMonth"));
-        setRangeSelectorsFromKeys(state.rangeStartKey, state.rangeEndKey);
+        if (state.minMonthKey && state.maxMonthKey) {
+          const minY = Number(state.minMonthKey.split("-")[0]);
+          const maxY = Number(state.maxMonthKey.split("-")[0]);
+          fillYearSelect(document.getElementById("startYear"), minY, maxY);
+          fillYearSelect(document.getElementById("endYear"), minY, maxY);
+          fillMonthSelect(document.getElementById("startMonth"));
+          fillMonthSelect(document.getElementById("endMonth"));
+          setRangeSelectorsFromKeys(state.rangeStartKey, state.rangeEndKey);
+        }
+      } catch (err) {
+        clearEditKey();
+        if (errMount) errMount.textContent = `Unlock failed: ${String(err?.message || err)}`;
       }
-    } catch (err) {
-      clearEditKey();
-      errMount.textContent = `Unlock failed: ${String(err?.message || err)}`;
-    }
-  });
+    });
+  }
 
   setLockedUI(true);
 }
