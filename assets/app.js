@@ -1,17 +1,22 @@
 // -------------------------
-// Runtime + Xano & Zapier config
+// Xano config
 // -------------------------
-const DEFAULT_XANO_BASE_URL = "https://x8ki-letl-twmt.n7.xano.io/api:ZvixoXZ8";
-const XANO_BASE_URL = (typeof window !== "undefined" && window.APP_CONFIG && window.APP_CONFIG.XANO_BASE_URL)
-  ? window.APP_CONFIG.XANO_BASE_URL
-  : DEFAULT_XANO_BASE_URL;
-
+const XANO_BASE_URL = "https://x8ki-letl-twmt.n7.xano.io/api:ZvixoXZ8";
 const XANO_TABLE_PATH = "/competitor_metrics_dashboard2";
 const XANO_CONFIG_PATH = "/app_config";
 const EDIT_KEY_NAME = "EDIT_KEY";
 const SESSION_KEY = "cmd.editKey.v1";
 
-// Resolve Zapier hook at runtime: window.APP_CONFIG -> sessionStorage -> null
+// -------------------------
+// Collect button -> Zapier hook (v1)
+// -------------------------
+// This is designed so "Collect data" can eventually trigger multiple collectors.
+// For now, it triggers a Zapier Zap (Catch Hook) that should scrape SWIIS fee page and update Xano.
+//
+// IMPORTANT:
+// - If your GitHub repo is public, anyone can see this URL and trigger the Zap.
+//   Consider using a proxy (Cloudflare Worker) or a secret token in the payload.
+// NOTE: replaced constant with runtime lookup (window.APP_CONFIG -> sessionStorage)
 function getZapierHook() {
   try {
     if (typeof window !== "undefined" && window.APP_CONFIG && window.APP_CONFIG.ZAPIER_CATCH_HOOK_URL) {
@@ -27,8 +32,6 @@ function getZapierHook() {
 
   return null;
 }
-
-// Helper to set a Zapier hook for the browser session (useful for local testing).
 function setZapierHookForSession(url) {
   try {
     if (!url) { sessionStorage.removeItem("ZAPIER_CATCH_HOOK_URL"); return; }
@@ -293,8 +296,35 @@ function previousMonthKeyUTC(monthKey) {
 }
 
 function lastMonthKeyUtcYYYYMM() {
+  // Today is whatever; we compute last month based on UTC calendar month.
   const thisKey = currentMonthKeyUTC();
   return previousMonthKeyUTC(thisKey);
+}
+
+// Add back the missing applyCustomRangeFromSelectors function
+function applyCustomRangeFromSelectors() {
+  const startKey = monthKeyFromYYYYMMParts(
+    (document.getElementById("startYear") || {}).value,
+    (document.getElementById("startMonth") || {}).value
+  );
+  const endKey = monthKeyFromYYYYMMParts(
+    (document.getElementById("endYear") || {}).value,
+    (document.getElementById("endMonth") || {}).value
+  );
+
+  if (!startKey || !endKey) return alert("Please select start and end month/year.");
+  if (compareMonthKey(startKey, endKey) > 0) return alert("Start month must be before (or the same as) End month.");
+
+  const quickThis = document.getElementById("quickThisMonth");
+  const quickLast = document.getElementById("quickLastMonth");
+  if (quickThis) quickThis.checked = false;
+  if (quickLast) quickLast.checked = false;
+
+  state.rangeStartKey = startKey;
+  state.rangeEndKey = endKey;
+  state.visibleMonths = listMonthKeysBetween(startKey, endKey);
+
+  refresh();
 }
 
 // -------------------------
@@ -553,27 +583,21 @@ function openEditMetricModal({ row, fieldKey, fieldLabel, currentValue, monthKey
   editModalState = { row, fieldKey, monthKey };
 
   const backdrop = document.getElementById("editMetricModalBackdrop");
-  const subtitle = document.getElementById("editMetricSubtitle");
-  const hint = document.getElementById("editMetricHint");
-  if (subtitle) subtitle.textContent = `${row.company} • ${monthKey} • ${fieldLabel}`;
-  if (hint) hint.textContent = "This updates the value in Xano.";
+  document.getElementById("editMetricSubtitle").textContent = `${row.company} • ${monthKey} • ${fieldLabel}`;
+  document.getElementById("editMetricHint").textContent = "This updates the value in Xano.";
 
   const input = document.getElementById("editMetricNewValue");
-  if (input) input.value = (currentValue === null || currentValue === undefined) ? "" : String(currentValue);
+  input.value = (currentValue === null || currentValue === undefined) ? "" : String(currentValue);
 
-  if (backdrop) {
-    backdrop.style.display = "flex";
-    backdrop.setAttribute("aria-hidden", "false");
-  }
-  setTimeout(() => input && input.focus(), 0);
+  backdrop.style.display = "flex";
+  backdrop.setAttribute("aria-hidden", "false");
+  setTimeout(() => input.focus(), 0);
 }
 
 function closeEditMetricModal() {
   const backdrop = document.getElementById("editMetricModalBackdrop");
-  if (backdrop) {
-    backdrop.style.display = "none";
-    backdrop.setAttribute("aria-hidden", "true");
-  }
+  backdrop.style.display = "none";
+  backdrop.setAttribute("aria-hidden", "true");
   editModalState = null;
 }
 
@@ -581,93 +605,71 @@ function openEditTextModal({ row, fieldKey, fieldLabel, currentValue, monthKey }
   editTextModalState = { row, fieldKey, monthKey };
 
   const backdrop = document.getElementById("editTextModalBackdrop");
-  const subtitle = document.getElementById("editTextSubtitle");
-  const hint = document.getElementById("editTextHint");
-  if (subtitle) subtitle.textContent = `${row.company} • ${monthKey} • ${fieldLabel}`;
-  if (hint) hint.textContent = "Multiple lines supported. Ctrl+Enter saves.";
+  document.getElementById("editTextSubtitle").textContent = `${row.company} • ${monthKey} • ${fieldLabel}`;
+  document.getElementById("editTextHint").textContent = "Multiple lines supported. Ctrl+Enter saves.";
 
   const textarea = document.getElementById("editTextNewValue");
-  if (textarea) textarea.value = (currentValue === null || currentValue === undefined) ? "" : String(currentValue);
+  textarea.value = (currentValue === null || currentValue === undefined) ? "" : String(currentValue);
 
-  const updateBtn = document.getElementById("editTextUpdate");
-  if (updateBtn) updateBtn.dataset.mode = "press";
+  document.getElementById("editTextUpdate").dataset.mode = "press";
 
-  if (backdrop) {
-    backdrop.style.display = "flex";
-    backdrop.setAttribute("aria-hidden", "false");
-  }
-  setTimeout(() => textarea && textarea.focus(), 0);
+  backdrop.style.display = "flex";
+  backdrop.setAttribute("aria-hidden", "false");
+  setTimeout(() => textarea.focus(), 0);
 }
 
 function openEditNotesModal({ row, monthKey }) {
   editNotesModalState = { row, monthKey };
 
   const backdrop = document.getElementById("editTextModalBackdrop");
-  const subtitle = document.getElementById("editTextSubtitle");
-  const hint = document.getElementById("editTextHint");
-  if (subtitle) subtitle.textContent = `${row.company} • ${monthKey} • Notes`;
-  if (hint) hint.textContent = "Edit notes (multi-line). Ctrl+Enter saves.";
+  document.getElementById("editTextSubtitle").textContent = `${row.company} • ${monthKey} • Notes`;
+  document.getElementById("editTextHint").textContent = "Edit notes (multi-line). Ctrl+Enter saves.";
 
   const textarea = document.getElementById("editTextNewValue");
-  if (textarea) textarea.value = row?.[NOTES_FIELD_KEY] ?? "";
+  textarea.value = row?.[NOTES_FIELD_KEY] ?? "";
 
-  const updateBtn = document.getElementById("editTextUpdate");
-  if (updateBtn) updateBtn.dataset.mode = "notes";
+  document.getElementById("editTextUpdate").dataset.mode = "notes";
 
-  if (backdrop) {
-    backdrop.style.display = "flex";
-    backdrop.setAttribute("aria-hidden", "false");
-  }
-  setTimeout(() => textarea && textarea.focus(), 0);
+  backdrop.style.display = "flex";
+  backdrop.setAttribute("aria-hidden", "false");
+  setTimeout(() => textarea.focus(), 0);
 }
 
 function closeEditTextModal() {
   const backdrop = document.getElementById("editTextModalBackdrop");
-  if (backdrop) {
-    backdrop.style.display = "none";
-    backdrop.setAttribute("aria-hidden", "true");
-  }
+  backdrop.style.display = "none";
+  backdrop.setAttribute("aria-hidden", "true");
   editTextModalState = null;
   editNotesModalState = null;
-  const updateBtn = document.getElementById("editTextUpdate");
-  if (updateBtn) updateBtn.dataset.mode = "";
+  document.getElementById("editTextUpdate").dataset.mode = "";
 }
 
 function wireEditModals() {
-  const metricClose = document.getElementById("editMetricClose");
-  if (metricClose) metricClose.addEventListener("click", closeEditMetricModal);
-  const metricBackdrop = document.getElementById("editMetricModalBackdrop");
-  if (metricBackdrop) metricBackdrop.addEventListener("click", (e) => {
+  document.getElementById("editMetricClose").addEventListener("click", closeEditMetricModal);
+  document.getElementById("editMetricModalBackdrop").addEventListener("click", (e) => {
     if (e.target.id === "editMetricModalBackdrop") closeEditMetricModal();
   });
 
-  const textClose = document.getElementById("editTextClose");
-  if (textClose) textClose.addEventListener("click", closeEditTextModal);
-  const textBackdrop = document.getElementById("editTextModalBackdrop");
-  if (textBackdrop) textBackdrop.addEventListener("click", (e) => {
+  document.getElementById("editTextClose").addEventListener("click", closeEditTextModal);
+  document.getElementById("editTextModalBackdrop").addEventListener("click", (e) => {
     if (e.target.id === "editTextModalBackdrop") closeEditTextModal();
   });
 
-  const metricInput = document.getElementById("editMetricNewValue");
-  if (metricInput) metricInput.addEventListener("keydown", (e) => {
+  document.getElementById("editMetricNewValue").addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
-      const btn = document.getElementById("editMetricUpdate");
-      if (btn) btn.click();
+      document.getElementById("editMetricUpdate").click();
     }
   });
 
-  const textArea = document.getElementById("editTextNewValue");
-  if (textArea) textArea.addEventListener("keydown", (e) => {
+  document.getElementById("editTextNewValue").addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
-      const btn = document.getElementById("editTextUpdate");
-      if (btn) btn.click();
+      document.getElementById("editTextUpdate").click();
     }
   });
 
-  const metricUpdateBtn = document.getElementById("editMetricUpdate");
-  if (metricUpdateBtn) metricUpdateBtn.addEventListener("click", async () => {
+  document.getElementById("editMetricUpdate").addEventListener("click", async () => {
     if (!editModalState) return;
 
     const btn = document.getElementById("editMetricUpdate");
@@ -708,11 +710,10 @@ function wireEditModals() {
     }
   });
 
-  const textUpdateBtn = document.getElementById("editTextUpdate");
-  if (textUpdateBtn) textUpdateBtn.addEventListener("click", async () => {
-    const mode = textUpdateBtn.dataset.mode || "";
-    const btn = textUpdateBtn;
-    const val = (document.getElementById("editTextNewValue") || {}).value;
+  document.getElementById("editTextUpdate").addEventListener("click", async () => {
+    const mode = document.getElementById("editTextUpdate").dataset.mode || "";
+    const btn = document.getElementById("editTextUpdate");
+    const val = document.getElementById("editTextNewValue").value;
     const payloadVal = (val === "" ? null : val);
 
     try {
@@ -1046,7 +1047,7 @@ function applyMetricsTableStyling() {
 }
 
 // -------------------------
-// Refresh / load / init
+// Refresh / reload
 // -------------------------
 function refresh() {
   const mount = document.getElementById("metricsDisplay");
@@ -1124,11 +1125,67 @@ function setLockedUI(locked) {
 async function attemptUnlock(password) {
   setEditKey(password);
   const ok = await verifyPassword(password);
-  if (!ok) {
-    clearEditKey();
-    throw new Error("Incorrect password.");
-  }
+  if (!ok) return false;
   await reloadFromXanoAndRefresh();
+  return true;
+}
+
+// -------------------------
+// Time range helpers already exist (setQuickThisMonth, setQuickLastMonth) - ensure they're present
+function fillMonthSelect(selectEl) {
+  selectEl.innerHTML = "";
+  for (const m of MONTH_LABELS) {
+    const opt = document.createElement("option");
+    opt.value = m.value;
+    opt.textContent = m.name;
+    selectEl.appendChild(opt);
+  }
+}
+
+function fillYearSelect(selectEl, minYear, maxYear) {
+  selectEl.innerHTML = "";
+  for (let y = minYear; y <= maxYear; y++) {
+    const opt = document.createElement("option");
+    opt.value = String(y);
+    opt.textContent = String(y);
+    selectEl.appendChild(opt);
+  }
+}
+
+function setRangeSelectorsFromKeys(startKey, endKey) {
+  const s = parseMonthKey(startKey);
+  const e = parseMonthKey(endKey);
+  if (!s || !e) return;
+  document.getElementById("startYear").value = String(s.year);
+  document.getElementById("startMonth").value = s.month;
+  document.getElementById("endYear").value = String(e.year);
+  document.getElementById("endMonth").value = e.month;
+}
+
+function applyCustomRangeFromSelectors_v2() {
+  // kept for backwards compatibility if needed; uses the main function
+  return applyCustomRangeFromSelectors();
+}
+
+function setQuickThisMonth() {
+  document.getElementById("quickLastMonth").checked = false;
+  const key = currentMonthKeyUTC();
+  state.rangeStartKey = key;
+  state.rangeEndKey = key;
+  state.visibleMonths = [key];
+  setRangeSelectorsFromKeys(key, key);
+  refresh();
+}
+
+function setQuickLastMonth() {
+  document.getElementById("quickThisMonth").checked = false;
+  const thisKey = currentMonthKeyUTC();
+  const lastKey = previousMonthKeyUTC(thisKey);
+  state.rangeStartKey = lastKey;
+  state.rangeEndKey = lastKey;
+  state.visibleMonths = [lastKey];
+  setRangeSelectorsFromKeys(lastKey, lastKey);
+  refresh();
 }
 
 // -------------------------
@@ -1294,7 +1351,8 @@ async function init() {
       if (errMount) errMount.textContent = "";
 
       try {
-        await attemptUnlock(pw);
+        const ok = await attemptUnlock(pw);
+        if (!ok) throw new Error("Incorrect password.");
         setLockedUI(false);
 
         if (state.minMonthKey && state.maxMonthKey) {
