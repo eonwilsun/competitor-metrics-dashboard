@@ -1194,8 +1194,20 @@ function setQuickLastMonth() {
 // Ask Xano to dispatch the GitHub Actions scraper and return a run_id.
 // Xano endpoint POST /trigger_collect must return { ok:true, run_id: "..." }.
 async function triggerCollectDispatch({ test = false } = {}) {
+  // lastMonthKeyUtcYYYYMM returns "YYYY-MM"
+  const mk = lastMonthKeyUtcYYYYMM() || currentMonthKeyUTC();
+  const parts = String(mk).split("-").map(s => s.trim());
+  let year = String(new Date().getUTCFullYear());
+  let month = String(new Date().getUTCMonth() + 1).padStart(2, "0");
+  if (parts.length === 2) {
+    year = String(parts[0]);
+    month = String(parts[1]).padStart(2, "0");
+  }
+
   const payload = {
-    month_key: lastMonthKeyUtcYYYYMM(),
+    year: Number(year),                      // Xano expects year param
+    month: String(month).padStart(2, "0"),   // 01..12
+    month_key: `${String(year)}-${String(month).padStart(2, "0")}`, // compatibility
     test: !!test
   };
 
