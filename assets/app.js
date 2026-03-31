@@ -1189,70 +1189,58 @@ function setQuickLastMonth() {
 }
 
 // -------------------------
-// Collect action: trigger Zapier (for SWIIS)
+// New: Dispatch + Poll flow (Option B)
 // -------------------------
-async function triggerZapierCollectAgencyFeeSwiisLastMonth() {
-  const hook = getZapierHook();
-  if (!hook) {
-    throw new Error("Missing ZAPIER_CATCH_HOOK_URL. Configure assets/config.js or set sessionStorage key 'ZAPIER_CATCH_HOOK_URL'.");
-  }
-
+// Ask Xano to dispatch the GitHub Actions scraper and return a run_id.
+// Xano endpoint POST /trigger_collect must return { ok:true, run_id: "..." }.
+async function triggerCollectDispatch({ test = false } = {}) {
   const payload = {
-    action: "collect_agency_fees",
-    company: "SWIIS",
     month_key: lastMonthKeyUtcYYYYMM(),
-    source_url: "https://www.swiisfostercare.com/fostering/fostering-allowance-pay/"
+    test: !!test
   };
 
-  const res = await fetch(hook, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-
-  if (!res.ok) {
-    const t = await res.text().catch(() => "");
-    throw new Error(`Zapier hook failed (${res.status}): ${t || res.statusText}`);
+  const res = await xanoFetch("/trigger_collect", { method: "POST", body: payload, withEditKey: true });
+  if (!res || !res.ok || !res.run_id) {
+    throw new Error(`Dispatch failed: ${JSON.stringify(res)}`);
   }
+  return res.run_id;
+}
+
+// Poll run status until finished, then refresh dashboard. Expects Xano GET /run_status/:run_id
+async function pollRunAndRefresh(runId, { intervalMs = 5000, timeoutMs = 5 * 60 * 1000 } = {}) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const status = await xanoFetch(`/run_status/${encodeURIComponent(runId)}`, { method: "GET", withEditKey: true });
+      // expected shape: { finished: boolean, success?: boolean, message?: string }
+      if (status && status.finished) {
+        if (status.success) {
+          try { await reloadFromXanoAndRefresh(); } catch (e) { console.warn("Refresh failed after run completion:", e); }
+          return { ok: true, status };
+        } else {
+          return { ok: false, status };
+        }
+      }
+    } catch (err) {
+      console.warn("pollRunAndRefresh transient error:", err);
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  return { ok: false, error: "timeout" };
 }
 
 // -------------------------
-// Test button: send sample payload to Zapier
+// Collect action: legacy Zapier trigger (kept for backwards compatibility)
 // -------------------------
-async function sendTestPayloadToZapier() {
-  let hook = getZapierHook();
-
-  if (!hook) {
-    const doPrompt = confirm(
-      "No Zapier hook is configured for this site. Would you like to enter a Zapier Catch Hook URL for this browser session? " +
-      "This will be stored only in your browser session and not committed to the repo."
-    );
-    if (!doPrompt) {
-      alert("Missing ZAPIER_CATCH_HOOK_URL. Add it to assets/config.js or use sessionStorage.");
-      return;
-    }
-    const entered = prompt("Paste your Zapier Catch Hook URL here (example: https://hooks.zapier.com/hooks/catch/12345/abcdef):");
-    if (!entered || !entered.trim()) {
-      alert("No URL entered — aborting.");
-      return;
-    }
-    hook = entered.trim();
-    try { sessionStorage.setItem("ZAPIER_CATCH_HOOK_URL", hook); } catch (e) { /* ignore */ }
-  }
-
-  const monthKey = lastMonthKeyUtcYYYYMM();
-  const payload = {
-    secret: "swiissecret",
-    month_key: monthKey,
-    action: "collect_agency_fees",
-    company: "SWIIS",
-    source_url: "https://www.swiisfostercare.com/fostering/fostering-allowance-pay/"
-  };
-
-  const btn = document.getElementById("testZapBtn");
-  const prevText = btn ? btn.textContent : null;
-  try {
-    if (btn) { btn.disabled = true; btn.textContent = "Sending test..."; }
+async function triggerZapierCollectAgencyFeeSwiisLastMonth() {
+  const hook = getZapierHook();
+  if (hook) {
+    const payload = {
+      action: "collect_agency_fees",
+      company: "SWIIS",
+      month_key: lastMonthKeyUtcYYYYMM(),
+      source_url: "https://www.swiisfostercare.com/fostering/fostering-allowance-pay/"
+    };
 
     const res = await fetch(hook, {
       method: "POST",
@@ -1261,12 +1249,28 @@ async function sendTestPayloadToZapier() {
     });
 
     if (!res.ok) {
-      const txt = await res.text().catch(() => "");
-      throw new Error(`Hook returned ${res.status}: ${txt || res.statusText}`);
+      const t = await res.text().catch(() => "");
+      throw new Error(`Zapier hook failed (${res.status}): ${t || res.statusText}`);
     }
+    return;
+  }
 
-    alert("Test payload sent. Check your Zapier trigger panel for the received data.");
-    console.log("Zapier test payload sent:", payload);
+  throw new Error("Missing ZAPIER_CATCH_HOOK_URL. Configure assets/config.js or set sessionStorage key 'ZAPIER_CATCH_HOOK_URL'.");
+}
+
+// -------------------------
+// Test button: use the Xano dispatch (test mode)
+async function sendTestPayloadToZapier() {
+  const btn = document.getElementById("testZapBtn");
+  const prevText = btn ? btn.textContent : null;
+  try {
+    if (btn) { btn.disabled = true; btn.textContent = "Sending test..."; }
+
+    // Trigger the same Xano dispatch endpoint but flag it as a test
+    const runId = await triggerCollectDispatch({ test: true });
+
+    alert("Test dispatch started. Run ID: " + runId + ". The scraper will run in GitHub Actions and post results to Xano.");
+    console.log("Test dispatch started, runId:", runId);
   } catch (err) {
     alert("Test failed: " + String(err?.message || err));
     console.error(err);
@@ -1296,15 +1300,18 @@ async function init() {
         collectBtn.disabled = true;
         collectBtn.textContent = "Collecting...";
 
-        // v1: trigger Zapier to scrape SWIIS agency fee and write back to Xano
-        await triggerZapierCollectAgencyFeeSwiisLastMonth();
+        // Dispatch scraper via Xano -> GitHub Actions
+        const runId = await triggerCollectDispatch();
+        console.log("Dispatched scraper run:", runId);
 
-        // give Zapier some time to run then refresh
-        setTimeout(async () => {
-          try { await reloadFromXanoAndRefresh(); } catch (e) { console.warn(e); }
-        }, 15000);
-
-        alert("Collect started. Wait ~10–60 seconds, then your dashboard will refresh.");
+        // Poll for completion and refresh dashboard
+        const pollResult = await pollRunAndRefresh(runId, { intervalMs: 5000, timeoutMs: 5 * 60 * 1000 });
+        if (pollResult.ok) {
+          alert("Collect complete — dashboard updated.");
+        } else {
+          console.warn("Collect finished with error/timeout:", pollResult);
+          alert("Collect finished with a problem (see console). You can refresh manually later.");
+        }
       } catch (err) {
         alert(String(err?.message || err));
       } finally {
@@ -1314,7 +1321,7 @@ async function init() {
     });
   }
 
-  // Test Zap button wiring
+  // Test Zap button wiring (now triggers Xano test dispatch)
   const testBtn = document.getElementById("testZapBtn");
   if (testBtn) testBtn.addEventListener("click", sendTestPayloadToZapier);
 
