@@ -353,8 +353,38 @@ function lastMonthKeyUtcYYYYMM() {
 }
 
 // -------------------------
-// Session + Edit Key
+// applyCustomRangeFromSelectors (must be defined before init)
+function applyCustomRangeFromSelectors() {
+  const startKey = monthKeyFromYYYYMMParts(
+    (document.getElementById("startYear") || {}).value,
+    (document.getElementById("startMonth") || {}).value
+  );
+  const endKey = monthKeyFromYYYYMMParts(
+    (document.getElementById("endYear") || {}).value,
+    (document.getElementById("endMonth") || {}).value
+  );
+
+  if (!startKey || !endKey) return alert("Please select start and end month/year.");
+  if (compareMonthKey(startKey, endKey) > 0) return alert("Start month must be before (or the same as) End month.");
+
+  const quickThis = document.getElementById("quickThisMonth");
+  const quickLast = document.getElementById("quickLastMonth");
+  if (quickThis) quickThis.checked = false;
+  if (quickLast) quickLast.checked = false;
+
+  state.rangeStartKey = startKey;
+  state.rangeEndKey = endKey;
+  state.visibleMonths = listMonthKeysBetween(startKey, endKey);
+
+  refresh();
+}
+// keep v2 alias for compatibility
+function applyCustomRangeFromSelectors_v2() { return applyCustomRangeFromSelectors(); }
+// expose to global scope in case HTML calls it directly
+window.applyCustomRangeFromSelectors = applyCustomRangeFromSelectors;
+
 // -------------------------
+// Session + Edit Key
 const SESSION_KEY = "cmd.editKey.v1";
 function getEditKey() { return sessionStorage.getItem(SESSION_KEY) || ""; }
 function setEditKey(k) { sessionStorage.setItem(SESSION_KEY, k); }
@@ -362,7 +392,6 @@ function clearEditKey() { sessionStorage.removeItem(SESSION_KEY); }
 
 // -------------------------
 // Generic API fetch
-// -------------------------
 async function apiFetch(url, { method = "GET", body = null, headers = {}, expectJson = true } = {}) {
   const opts = { method, headers: { ...(headers || {}) } };
   if (body !== null && body !== undefined) {
@@ -381,7 +410,6 @@ async function apiFetch(url, { method = "GET", body = null, headers = {}, expect
 // -------------------------
 // Zapier Data adapters (no fallback)
 // -------------------------
-// Fetch rows from Zapier GET webhook (must return array/object with items/data)
 async function fetchRowsFromZapier() {
   const zapGet = getZapierTableGetUrl();
   if (!zapGet) throw new Error("Missing ZAPIER_TABLE_GET_URL. Set window.APP_CONFIG.ZAPIER_TABLE_GET_URL or sessionStorage key.");
@@ -396,9 +424,6 @@ async function fetchRowsFromZapier() {
   return [];
 }
 
-// Patch/update a single row via Zapier PATCH webhook.
-// POST body: { id: "<row id>", fields: { key: value, ... } }
-// Response: updated row object
 async function patchRowToZapier(rowId, fields) {
   const zapPatch = getZapierTablePatchUrl();
   if (!zapPatch) throw new Error("Missing ZAPIER_TABLE_PATCH_URL. Set window.APP_CONFIG.ZAPIER_TABLE_PATCH_URL or sessionStorage key.");
@@ -408,7 +433,6 @@ async function patchRowToZapier(rowId, fields) {
   return updated;
 }
 
-// Fetch edit key from Zapier config endpoint (optional)
 async function fetchEditKeyFromZapier() {
   const cfgUrl = getZapierConfigGetUrl();
   if (cfgUrl) {
@@ -440,7 +464,6 @@ async function verifyPassword(pw) {
 
 // -------------------------
 // State
-// -------------------------
 const state = {
   visibleMonths: [],
   rangeStartKey: null,
@@ -520,7 +543,6 @@ function getRowId(row) {
 
 // -------------------------
 // Build PATCH bodies for virtual fields
-// -------------------------
 function buildPatchBodyForMetric(row, fieldKey, rawNum) {
   const num = Number(rawNum);
 
@@ -564,7 +586,6 @@ function buildPatchBodyForMetric(row, fieldKey, rawNum) {
 
 // -------------------------
 // Last updated + chart downloads
-// -------------------------
 function formatUtcTimestamp(dt) {
   const yyyy = dt.getUTCFullYear();
   const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
@@ -639,7 +660,7 @@ function wireChartDownloadButtons() {
 }
 
 // -------------------------
-// Modals
+// Modals (unchanged)
 // -------------------------
 let editModalState = null;
 let editTextModalState = null;
@@ -822,7 +843,6 @@ function wireEditModals() {
 
 // -------------------------
 // Multi-month averaging
-// -------------------------
 function averageNumericForCompanyAcrossMonths(companyName, monthKeys, fieldKey) {
   const vals = monthKeys
     .map(mk => findRowByCompanyAndMonth(companyName, mk))
@@ -840,7 +860,6 @@ function averageNumericForCompanyAcrossMonths(companyName, monthKeys, fieldKey) 
 
 // -------------------------
 // Table rendering (unchanged)
-// -------------------------
 function buildMetricsTable(visibleMonths, companies) {
   const table = el("table");
   const thead = el("thead");
@@ -964,7 +983,6 @@ function buildMetricsTable(visibleMonths, companies) {
 
 // -------------------------
 // Chart.js (unchanged)
-// -------------------------
 let metricChart = null;
 
 function getNumericMetricValue(row, metricKey) {
@@ -1074,7 +1092,6 @@ function renderChart() {
 
 // -------------------------
 // Styling (unchanged)
-// -------------------------
 function applyMetricsTableStyling() {
   const root = document.getElementById("metricsDisplay");
   const table = root?.querySelector("table");
@@ -1102,7 +1119,6 @@ function applyMetricsTableStyling() {
 
 // -------------------------
 // Refresh / reload (Zapier)
-// -------------------------
 function refresh() {
   const mount = document.getElementById("metricsDisplay");
   mount.innerHTML = "";
@@ -1185,14 +1201,12 @@ async function attemptUnlock(password) {
 }
 
 // -------------------------
-// Collect action: trigger Zapier catch hook (starts scraping in Zapier/other)
-// -------------------------
+// Collect action: trigger Zapier catch hook
 async function triggerCollectViaZapier({ test = false } = {}) {
   const hook = getZapierHook();
   if (!hook) throw new Error("Missing ZAPIER_CATCH_HOOK_URL. Configure window.APP_CONFIG.ZAPIER_CATCH_HOOK_URL or sessionStorage key.");
 
   const mk = lastMonthKeyUtcYYYYMM() || currentMonthKeyUTC();
-  // payload for scraper - you can adapt fields as your Zap expects
   const payload = {
     action: "collect_last_month",
     month_key: mk,
@@ -1207,139 +1221,4 @@ async function triggerCollectViaZapier({ test = false } = {}) {
 
   if (!res.ok) {
     const t = await res.text().catch(() => "");
-    throw new Error(`Zapier hook failed (${res.status}): ${t || res.statusText}`);
-  }
-
-  return await res.json().catch(() => ({}));
-}
-
-// -------------------------
-// Test button: sends a test payload to Zapier catch hook
-// -------------------------
-async function sendTestPayloadToZapier() {
-  const btn = document.getElementById("testZapBtn");
-  const prevText = btn ? btn.textContent : null;
-  try {
-    if (btn) { btn.disabled = true; btn.textContent = "Sending test..."; }
-
-    await triggerCollectViaZapier({ test: true });
-
-    alert("Test dispatch sent to Zapier. Wait a few seconds and click Refresh to load results from Zapier Table.");
-  } catch (err) {
-    alert("Test failed: " + String(err?.message || err));
-    console.error(err);
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = prevText; }
-  }
-}
-
-// -------------------------
-// Init
-// -------------------------
-async function init() {
-  wireEditModals();
-  ensureChartMetricOptions(true);
-  wireChartDownloadButtons();
-
-  const chartSelect = document.getElementById("chartMetricSelect");
-  if (chartSelect) chartSelect.addEventListener("change", renderChart);
-
-  // Collect data button: trigger Zapier collect hook
-  const collectBtn = document.getElementById("collectDataBtn");
-  if (collectBtn) {
-    collectBtn.addEventListener("click", async () => {
-      const prevText = collectBtn.textContent;
-
-      try {
-        collectBtn.disabled = true;
-        collectBtn.textContent = "Triggering...";
-
-        await triggerCollectViaZapier();
-        // Give Zapier a moment to run the scrape & update table; then reload.
-        setTimeout(async () => {
-          try {
-            await reloadFromZapierAndRefresh();
-            alert("Collect triggered and Zapier Table reloaded (if Zap completed).");
-          } catch (e) {
-            console.warn("Reload after collect failed:", e);
-            alert("Collect triggered. Refresh the page after a moment to see updates.");
-          }
-        }, 8000);
-      } catch (err) {
-        alert(String(err?.message || err));
-      } finally {
-        collectBtn.disabled = false;
-        collectBtn.textContent = prevText;
-      }
-    });
-  }
-
-  // Test Zap button
-  const testBtn = document.getElementById("testZapBtn");
-  if (testBtn) testBtn.addEventListener("click", sendTestPayloadToZapier);
-
-  // Enter = Unlock
-  const pwInput = document.getElementById("pagePassword");
-  if (pwInput) {
-    pwInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        const unlockBtn = document.getElementById("unlockBtn");
-        if (unlockBtn) unlockBtn.click();
-      }
-    });
-  }
-
-  const applyRangeBtn = document.getElementById("applyRange");
-  if (applyRangeBtn) applyRangeBtn.addEventListener("click", applyCustomRangeFromSelectors);
-  const quickThis = document.getElementById("quickThisMonth");
-  if (quickThis) quickThis.addEventListener("change", (e) => { if (e.target.checked) setQuickThisMonth(); });
-  const quickLast = document.getElementById("quickLastMonth");
-  if (quickLast) quickLast.addEventListener("change", (e) => { if (e.target.checked) setQuickLastMonth(); });
-
-  const lockBtn = document.getElementById("lockBtn");
-  if (lockBtn) lockBtn.addEventListener("click", () => {
-    clearEditKey();
-    setLockedUI(true);
-  });
-
-  const unlockBtn = document.getElementById("unlockBtn");
-  if (unlockBtn) {
-    unlockBtn.addEventListener("click", async () => {
-      const pw = (document.getElementById("pagePassword") || {}).value;
-      const errMount = document.getElementById("lockError");
-      if (errMount) errMount.textContent = "";
-
-      try {
-        const ok = await attemptUnlock(pw);
-        if (!ok) throw new Error("Incorrect password.");
-        setLockedUI(false);
-
-        if (state.minMonthKey && state.maxMonthKey) {
-          const minY = Number(state.minMonthKey.split("-")[0]);
-          const maxY = Number(state.maxMonthKey.split("-")[0]);
-          fillYearSelect(document.getElementById("startYear"), minY, maxY);
-          fillYearSelect(document.getElementById("endYear"), minY, maxY);
-          fillMonthSelect(document.getElementById("startMonth"));
-          fillMonthSelect(document.getElementById("endMonth"));
-          setRangeSelectorsFromKeys(state.rangeStartKey, state.rangeEndKey);
-        }
-      } catch (err) {
-        clearEditKey();
-        if (errMount) errMount.textContent = `Unlock failed: ${String(err?.message || err)}`;
-      }
-    });
-  }
-
-  setLockedUI(true);
-}
-
-function showFatal(err) {
-  console.error(err);
-  const lockErr = document.getElementById("lockError");
-  if (lockErr) lockErr.textContent = String(err?.stack || err);
-}
-
-window.addEventListener("DOMContentLoaded", () => {
-  init().catch(showFatal);
-});
+    throw new Error(`Zapier hook failed (${res.status}): ${t*
