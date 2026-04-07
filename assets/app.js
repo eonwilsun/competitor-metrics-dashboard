@@ -1,5 +1,4 @@
-// app.js - Full replacement (permanent fix): Zapier primary backend, Xano fallback, Debug overlay.
-// Includes applyCustomRangeFromSelectors and alias to fix init-time errors.
+// app.js - Full replacement (stable): Zapier primary backend, Xano fallback, Debug overlay.
 // Replace deployed assets/app.js with this file and hard-refresh (Ctrl/Cmd+Shift+R).
 
 // -------------------------
@@ -268,7 +267,7 @@ function computeMinMaxMonthKey(rows) {
 }
 
 // -------------------------
-// Add permanent applyCustomRangeFromSelectors + alias
+// applyCustomRangeFromSelectors + alias (permanent)
 function applyCustomRangeFromSelectors() {
   const startKey = monthKeyFromYYYYMMParts(
     (document.getElementById("startYear") || {}).value,
@@ -294,6 +293,23 @@ function applyCustomRangeFromSelectors() {
   refresh();
 }
 function applyCustomRangeFromSelectors_v2() { return applyCustomRangeFromSelectors(); }
+
+// -------------------------
+// setLockedUI - must exist before init runs
+function setLockedUI(locked){
+  const lockScreen = document.getElementById("lockScreen");
+  const appRoot = document.getElementById("appRoot");
+  const lockBtn = document.getElementById("lockBtn");
+  if (locked) {
+    if (lockScreen) lockScreen.classList.remove("hidden");
+    if (appRoot) appRoot.classList.add("hidden");
+    if (lockBtn) lockBtn.classList.add("hidden");
+  } else {
+    if (lockScreen) lockScreen.classList.add("hidden");
+    if (appRoot) appRoot.classList.remove("hidden");
+    if (lockBtn) lockBtn.classList.remove("hidden");
+  }
+}
 
 // -------------------------
 // Chart / render / UI functions (complete)
@@ -481,6 +497,11 @@ function wireChartDownloadButtons(){ const png=document.getElementById("download
 function applyMetricsTableStyling(){ const root=document.getElementById("metricsDisplay"); const table=root?.querySelector("table"); if(!table) return; root.querySelectorAll(".clickable-metric").forEach(n=>n.style.textDecoration="none"); table.querySelectorAll("td").forEach(td=>{ td.style.textAlign="center"; td.style.verticalAlign="middle"; }); table.querySelectorAll("tr").forEach(tr=>{ const tds=tr.querySelectorAll("td"); if(tds[0]) tds[0].style.textAlign="left"; if(tds[1]) tds[1].style.textAlign="left"; }); table.querySelectorAll("td").forEach(td=>{ if(td.querySelector(".metrics-rich")) td.style.textAlign="left"; }); }
 
 // -------------------------
+// Helper utilities used in multiple places
+function uniqueCompanies(rows){ const set=new Set(rows.map(r=>normalizeCompanyName(r.company)).filter(Boolean)); return Array.from(set).sort(companySort); }
+function findRowByCompanyAndMonth(companyName, monthKey){ return state.rows.find(r=>String(r.company)===String(companyName) && monthKeyFromYearMonthName(r.year, r.month)===monthKey); }
+
+// -------------------------
 // Refresh / reload (canonical implementation)
 async function reloadFromXanoAndRefresh() {
   try {
@@ -602,14 +623,27 @@ async function sendTestPayloadToZapier() {
 }
 
 // -------------------------
+// Quick range helpers
+function setQuickThisMonth(){
+  const key = currentMonthKeyUTC();
+  state.rangeStartKey = key; state.rangeEndKey = key; state.visibleMonths = [key];
+  refresh();
+}
+function setQuickLastMonth(){
+  const key = lastMonthKeyUtcYYYYMM();
+  state.rangeStartKey = key; state.rangeEndKey = key; state.visibleMonths = key ? [key] : [];
+  refresh();
+}
+
+// -------------------------
 // Range select helpers
-function fillMonthSelect(selectEl){ selectEl.innerHTML=""; for(const m of MONTH_LABELS){ const opt=document.createElement("option"); opt.value=m.value; opt.textContent=m.name; selectEl.appendChild(opt);} }
-function fillYearSelect(selectEl, minYear, maxYear){ selectEl.innerHTML=""; for(let y=minYear;y<=maxYear;y++){ const opt=document.createElement("option"); opt.value=String(y); opt.textContent=String(y); selectEl.appendChild(opt);} }
-function setRangeSelectorsFromKeys(startKey, endKey){ const s=parseMonthKey(startKey), e=parseMonthKey(endKey); if(!s||!e) return; document.getElementById("startYear").value=String(s.year); document.getElementById("startMonth").value=s.month; document.getElementById("endYear").value=String(e.year); document.getElementById("endMonth").value=e.month; }
+function fillMonthSelect(selectEl){ if(!selectEl) return; selectEl.innerHTML=""; for(const m of MONTH_LABELS){ const opt=document.createElement("option"); opt.value=m.value; opt.textContent=m.name; selectEl.appendChild(opt);} }
+function fillYearSelect(selectEl, minYear, maxYear){ if(!selectEl) return; selectEl.innerHTML=""; for(let y=minYear;y<=maxYear;y++){ const opt=document.createElement("option"); opt.value=String(y); opt.textContent=String(y); selectEl.appendChild(opt);} }
+function setRangeSelectorsFromKeys(startKey, endKey){ const s=parseMonthKey(startKey), e=parseMonthKey(endKey); if(!s||!e) return; const sy=document.getElementById("startYear"), sm=document.getElementById("startMonth"), ey=document.getElementById("endYear"), em=document.getElementById("endMonth"); if(sy) sy.value=String(s.year); if(sm) sm.value=s.month; if(ey) ey.value=String(e.year); if(em) em.value=e.month; }
 
 // -------------------------
 // Refresh wrapper
-function refresh(){ const mount=document.getElementById("metricsDisplay"); if(!mount) return; mount.innerHTML=""; if(!state.latestMonthKey){ mount.appendChild(el("p",{className:"muted", text:"No data found in backend."})); destroyChart(); return; } const visibleMonths = state.visibleMonths.length ? state.visibleMonths : [state.latestMonthKey]; const selected = uniqueCompanies(state.rows).filter(c=>state.selectedCompanies.has(c)); document.getElementById("lastUpdated").textContent = `Loaded from backend. Latest month: ${state.latestMonthKey}. Viewing: ${visibleMonths.join(", ")}.`; setLastUpdatedAtText(); if(!selected.length){ mount.appendChild(el("p",{className:"muted", text:"No companies selected."})); destroyChart(); return; } mount.appendChild(buildMetricsTable(visibleMonths, selected)); ensureChartMetricOptions(false); renderChart(); applyMetricsTableStyling(); }
+function refresh(){ const mount=document.getElementById("metricsDisplay"); if(!mount) return; mount.innerHTML=""; if(!state.latestMonthKey){ mount.appendChild(el("p",{className:"muted", text:"No data found in backend."})); destroyChart(); return; } const visibleMonths = state.visibleMonths.length ? state.visibleMonths : [state.latestMonthKey]; const selected = uniqueCompanies(state.rows).filter(c=>state.selectedCompanies.has(c)); const lastUpdatedEl=document.getElementById("lastUpdated"); if(lastUpdatedEl) lastUpdatedEl.textContent = `Loaded from backend. Latest month: ${state.latestMonthKey}. Viewing: ${visibleMonths.join(", ")}.`; setLastUpdatedAtText(); if(!selected.length){ mount.appendChild(el("p",{className:"muted", text:"No companies selected."})); destroyChart(); return; } mount.appendChild(buildMetricsTable(visibleMonths, selected)); ensureChartMetricOptions(false); renderChart(); applyMetricsTableStyling(); }
 
 // -------------------------
 // Debug overlay (button + panel)
@@ -639,7 +673,7 @@ function createDebugUI() {
     out.innerHTML = "<pre>Running checks...\n</pre>";
     const log = (s) => { out.innerHTML += s + "\n"; };
     try {
-      const names = ["init","wireEditModals","fetchRowsFromBackend","patchRowToBackend","fetchEditKeyFromXano","verifyPassword","computeLatestMonthKey","computeMinMaxMonthKey","reloadFromXanoAndRefresh"];
+      const names = ["init","wireEditModals","fetchRowsFromBackend","patchRowToBackend","fetchEditKeyFromXano","verifyPassword","computeLatestMonthKey","computeMinMaxMonthKey","reloadFromXanoAndRefresh","applyCustomRangeFromSelectors","setLockedUI"];
       for (const n of names) log(`${n}: ${(typeof window[n] === "function") ? "function" : typeof window[n]}`);
       log("\nTrying fetchEditKeyFromXano (6s timeout)...");
       if (typeof fetchEditKeyFromXano === "function") {
@@ -668,6 +702,8 @@ if (document.readyState === "loading") document.addEventListener("DOMContentLoad
 
 // -------------------------
 // Init
+async function attemptUnlock(password){ setEditKey(password); const ok = await verifyPassword(password); if(!ok) return false; await reloadFromXanoAndRefresh(); return true; }
+
 async function init(){
   try{
     wireEditModals();
