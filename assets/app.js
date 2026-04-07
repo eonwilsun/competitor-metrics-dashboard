@@ -1,5 +1,6 @@
-// app.js - Full replacement with Zapier primary backend, Xano fallback, and a Debug overlay.
-// Replace your deployed assets/app.js with this file and hard-refresh (Ctrl/Cmd+Shift+R).
+// app.js - Full replacement (permanent fix): Zapier primary backend, Xano fallback, Debug overlay.
+// Includes applyCustomRangeFromSelectors and alias to fix init-time errors.
+// Replace deployed assets/app.js with this file and hard-refresh (Ctrl/Cmd+Shift+R).
 
 // -------------------------
 // Session / Edit Key helpers
@@ -145,7 +146,6 @@ async function fetchRowsFromBackend() {
       console.warn("Zapier GET failed, falling back to Xano:", e);
     }
   }
-  // fallback to Xano GET
   const xurl = getXanoTableGetUrl() || (XANO_BASE_URL + XANO_TABLE_PATH);
   const res = await apiFetch(xurl, { method: "GET" });
   if (Array.isArray(res)) return res;
@@ -166,7 +166,6 @@ async function patchRowToBackend(rowId, fields) {
       console.warn("Zapier PATCH failed, attempting Xano fallback:", e);
     }
   }
-  // fallback to Xano PATCH
   const base = getXanoTablePatchUrl() || (XANO_BASE_URL + XANO_TABLE_PATH);
   const url = `${base.replace(/\/$/,"")}/${encodeURIComponent(rowId)}`;
   const updated = await apiFetch(url, { method: "PATCH", body: fields });
@@ -269,8 +268,37 @@ function computeMinMaxMonthKey(rows) {
 }
 
 // -------------------------
+// Add permanent applyCustomRangeFromSelectors + alias
+function applyCustomRangeFromSelectors() {
+  const startKey = monthKeyFromYYYYMMParts(
+    (document.getElementById("startYear") || {}).value,
+    (document.getElementById("startMonth") || {}).value
+  );
+  const endKey = monthKeyFromYYYYMMParts(
+    (document.getElementById("endYear") || {}).value,
+    (document.getElementById("endMonth") || {}).value
+  );
+
+  if (!startKey || !endKey) return alert("Please select start and end month/year.");
+  if (compareMonthKey(startKey, endKey) > 0) return alert("Start month must be before (or the same as) End month.");
+
+  const quickThis = document.getElementById("quickThisMonth");
+  const quickLast = document.getElementById("quickLastMonth");
+  if (quickThis) quickThis.checked = false;
+  if (quickLast) quickLast.checked = false;
+
+  state.rangeStartKey = startKey;
+  state.rangeEndKey = endKey;
+  state.visibleMonths = listMonthKeysBetween(startKey, endKey);
+
+  refresh();
+}
+function applyCustomRangeFromSelectors_v2() { return applyCustomRangeFromSelectors(); }
+
+// -------------------------
 // Chart / render / UI functions (complete)
-// Note: these are the full implementations used by the app (kept functionally identical to your original UI logic).
+// Note: these implementations match your app behavior.
+let metricChart = null;
 let editModalState = null, editTextModalState = null, editNotesModalState = null;
 
 function ensureChartMetricOptions(force = false) {
@@ -347,6 +375,9 @@ function formatValue(v, format) {
   if (format === "float") { const n = Number(v); if (!Number.isFinite(n)) return "—"; const fixed = n.toFixed(2); return fixed.replace(/\.00$/, "").replace(/(\.\d)0$/, "$1"); }
   return String(v);
 }
+
+function extractPostsTotal(obj){ if(!obj||typeof obj!=="object") return toNumberOrNull(obj); return toNumberOrNull(obj.number_of_monthly_instagram_posts_total ?? obj.Total ?? obj.total ?? obj.total_posts); }
+function extractEngagementTotal(obj){ if(!obj||typeof obj!=="object") return toNumberOrNull(obj); return toNumberOrNull(obj.total_engagement ?? obj.Total ?? obj.total ?? obj.totalEngagement); }
 
 function buildMetricsTable(visibleMonths, companies) {
   const table = el("table");
@@ -579,13 +610,6 @@ function setRangeSelectorsFromKeys(startKey, endKey){ const s=parseMonthKey(star
 // -------------------------
 // Refresh wrapper
 function refresh(){ const mount=document.getElementById("metricsDisplay"); if(!mount) return; mount.innerHTML=""; if(!state.latestMonthKey){ mount.appendChild(el("p",{className:"muted", text:"No data found in backend."})); destroyChart(); return; } const visibleMonths = state.visibleMonths.length ? state.visibleMonths : [state.latestMonthKey]; const selected = uniqueCompanies(state.rows).filter(c=>state.selectedCompanies.has(c)); document.getElementById("lastUpdated").textContent = `Loaded from backend. Latest month: ${state.latestMonthKey}. Viewing: ${visibleMonths.join(", ")}.`; setLastUpdatedAtText(); if(!selected.length){ mount.appendChild(el("p",{className:"muted", text:"No companies selected."})); destroyChart(); return; } mount.appendChild(buildMetricsTable(visibleMonths, selected)); ensureChartMetricOptions(false); renderChart(); applyMetricsTableStyling(); }
-
-// -------------------------
-// Modals & init wiring are already defined above, now define init and debug UI
-
-function setLockedUI(locked){ const lockScreen=document.getElementById("lockScreen"), appRoot=document.getElementById("appRoot"), lockBtn=document.getElementById("lockBtn"); if(locked){ lockScreen && lockScreen.classList.remove("hidden"); appRoot && appRoot.classList.add("hidden"); lockBtn && lockBtn.classList.add("hidden"); } else { lockScreen && lockScreen.classList.add("hidden"); appRoot && appRoot.classList.remove("hidden"); lockBtn && lockBtn.classList.remove("hidden"); } }
-
-async function attemptUnlock(password){ setEditKey(password); const ok = await verifyPassword(password); if(!ok) return false; await reloadFromXanoAndRefresh(); return true; }
 
 // -------------------------
 // Debug overlay (button + panel)
