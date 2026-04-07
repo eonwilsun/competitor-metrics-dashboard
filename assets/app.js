@@ -1,22 +1,13 @@
-// Full app.js - updated to support Zapier Table backend (GET + PATCH webhooks) while keeping Xano fallback.
+// Full app.js - Zapier-only backend (GET + PATCH webhooks).
 // Replace your existing app.js with this file. Configure webhook URLs via window.APP_CONFIG or sessionStorage.
-
-// -------------------------
-// Xano config (legacy/fallback)
-// -------------------------
-const XANO_BASE_URL = "https://x8ki-letl-twmt.n7.xano.io/api:ZvixoXZ8";
-const XANO_TABLE_PATH = "/competitor_metrics_dashboard2";
-const XANO_CONFIG_PATH = "/app_config";
-const EDIT_KEY_NAME = "EDIT_KEY";
-const SESSION_KEY = "cmd.editKey.v1";
 
 // -------------------------
 // Zapier / Backend webhook config
 // -------------------------
-// These endpoints are expected to be provided via window.APP_CONFIG or sessionStorage
-// - ZAPIER_TABLE_GET_URL: GET endpoint returning array of rows (JSON)
-// - ZAPIER_TABLE_PATCH_URL: POST endpoint accepting { id, fields } and returning updated row object
-// Optional: ZAPIER_CONFIG_GET_URL: returns key/value config (for EDIT_KEY)
+// Provide via window.APP_CONFIG or sessionStorage:
+// - ZAPIER_TABLE_GET_URL  -> GET endpoint returning array of rows (JSON)
+// - ZAPIER_TABLE_PATCH_URL -> POST endpoint accepting { id, fields } and returning updated row object
+// - ZAPIER_CATCH_HOOK_URL -> optional Zapier "catch hook" which triggers collection/scrape
 function getZapierTableGetUrl() {
   try {
     if (typeof window !== "undefined" && window.APP_CONFIG && window.APP_CONFIG.ZAPIER_TABLE_GET_URL) {
@@ -57,30 +48,6 @@ function setZapierTablePatchUrlForSession(url) {
   } catch (e) { /* ignore */ }
 }
 
-function getZapierConfigGetUrl() {
-  try {
-    if (typeof window !== "undefined" && window.APP_CONFIG && window.APP_CONFIG.ZAPIER_CONFIG_GET_URL) {
-      const v = String(window.APP_CONFIG.ZAPIER_CONFIG_GET_URL || "").trim();
-      if (v) return v;
-    }
-  } catch (e) { /* ignore */ }
-  try {
-    const s = sessionStorage.getItem("ZAPIER_CONFIG_GET_URL");
-    if (s && String(s).trim()) return String(s).trim();
-  } catch (e) { /* ignore */ }
-  return null;
-}
-function setZapierConfigGetUrlForSession(url) {
-  try {
-    if (!url) { sessionStorage.removeItem("ZAPIER_CONFIG_GET_URL"); return; }
-    sessionStorage.setItem("ZAPIER_CONFIG_GET_URL", String(url).trim());
-  } catch (e) { /* ignore */ }
-}
-
-// -------------------------
-// Collect button -> Zapier hook (v1)
-// -------------------------
-// This helper remains - you can still point the legacy Zapier catch hook here.
 function getZapierHook() {
   try {
     if (typeof window !== "undefined" && window.APP_CONFIG && window.APP_CONFIG.ZAPIER_CATCH_HOOK_URL) {
@@ -100,6 +67,27 @@ function setZapierHookForSession(url) {
   try {
     if (!url) { sessionStorage.removeItem("ZAPIER_CATCH_HOOK_URL"); return; }
     sessionStorage.setItem("ZAPIER_CATCH_HOOK_URL", String(url).trim());
+  } catch (e) { /* ignore */ }
+}
+
+// Optional config endpoint that returns key/value pairs (for edit key)
+function getZapierConfigGetUrl() {
+  try {
+    if (typeof window !== "undefined" && window.APP_CONFIG && window.APP_CONFIG.ZAPIER_CONFIG_GET_URL) {
+      const v = String(window.APP_CONFIG.ZAPIER_CONFIG_GET_URL || "").trim();
+      if (v) return v;
+    }
+  } catch (e) { /* ignore */ }
+  try {
+    const s = sessionStorage.getItem("ZAPIER_CONFIG_GET_URL");
+    if (s && String(s).trim()) return String(s).trim();
+  } catch (e) { /* ignore */ }
+  return null;
+}
+function setZapierConfigGetUrlForSession(url) {
+  try {
+    if (!url) { sessionStorage.removeItem("ZAPIER_CONFIG_GET_URL"); return; }
+    sessionStorage.setItem("ZAPIER_CONFIG_GET_URL", String(url).trim());
   } catch (e) { /* ignore */ }
 }
 
@@ -364,62 +352,16 @@ function lastMonthKeyUtcYYYYMM() {
   return previousMonthKeyUTC(thisKey);
 }
 
-// Add back the missing applyCustomRangeFromSelectors function
-function applyCustomRangeFromSelectors() {
-  const startKey = monthKeyFromYYYYMMParts(
-    (document.getElementById("startYear") || {}).value,
-    (document.getElementById("startMonth") || {}).value
-  );
-  const endKey = monthKeyFromYYYYMMParts(
-    (document.getElementById("endYear") || {}).value,
-    (document.getElementById("endMonth") || {}).value
-  );
-
-  if (!startKey || !endKey) return alert("Please select start and end month/year.");
-  if (compareMonthKey(startKey, endKey) > 0) return alert("Start month must be before (or the same as) End month.");
-
-  const quickThis = document.getElementById("quickThisMonth");
-  const quickLast = document.getElementById("quickLastMonth");
-  if (quickThis) quickThis.checked = false;
-  if (quickLast) quickLast.checked = false;
-
-  state.rangeStartKey = startKey;
-  state.rangeEndKey = endKey;
-  state.visibleMonths = listMonthKeysBetween(startKey, endKey);
-
-  refresh();
-}
-
 // -------------------------
-// Session + Xano (and Zapier adapter)
+// Session + Edit Key
 // -------------------------
+const SESSION_KEY = "cmd.editKey.v1";
 function getEditKey() { return sessionStorage.getItem(SESSION_KEY) || ""; }
 function setEditKey(k) { sessionStorage.setItem(SESSION_KEY, k); }
 function clearEditKey() { sessionStorage.removeItem(SESSION_KEY); }
 
-// Original Xano fetch retained for fallback
-async function xanoFetch(path, { method = "GET", body = null, withEditKey = true } = {}) {
-  const headers = { "Content-Type": "application/json" };
-  if (withEditKey) {
-    const key = getEditKey();
-    if (key) headers["x-edit-key"] = key;
-  }
-
-  const res = await fetch(`${XANO_BASE_URL}${path}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : null
-  });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Xano error ${res.status}: ${text || res.statusText}`);
-  }
-  return await res.json();
-}
-
 // -------------------------
-// Generic API fetch / Zapier adapter
+// Generic API fetch
 // -------------------------
 async function apiFetch(url, { method = "GET", body = null, headers = {}, expectJson = true } = {}) {
   const opts = { method, headers: { ...(headers || {}) } };
@@ -436,94 +378,60 @@ async function apiFetch(url, { method = "GET", body = null, headers = {}, expect
   return await res.json();
 }
 
-// Fetch rows from the Zapier-provided GET webhook (must return array of rows JSON)
-async function fetchRowsFromBackend() {
+// -------------------------
+// Zapier Data adapters (no fallback)
+// -------------------------
+// Fetch rows from Zapier GET webhook (must return array/object with items/data)
+async function fetchRowsFromZapier() {
   const zapGet = getZapierTableGetUrl();
-  if (zapGet) {
-    const rows = await apiFetch(zapGet, { method: "GET" });
-    if (Array.isArray(rows)) return rows;
-    if (rows && Array.isArray(rows.items)) return rows.items;
-    if (rows && Array.isArray(rows.data)) return rows.data;
-    // If Zap returns object keyed, try to find the rows array inside
-    // fallback: if it's an object with keys mapped to rows, convert to array
-    if (rows && typeof rows === "object") {
-      // simple heuristic: look for first array property
-      for (const k of Object.keys(rows)) {
-        if (Array.isArray(rows[k])) return rows[k];
-      }
-    }
-    return [];
-  }
+  if (!zapGet) throw new Error("Missing ZAPIER_TABLE_GET_URL. Set window.APP_CONFIG.ZAPIER_TABLE_GET_URL or sessionStorage key.");
 
-  // fallback to Xano (legacy)
-  const res = await xanoFetch(XANO_TABLE_PATH, { method: "GET", withEditKey: false });
-  return Array.isArray(res) ? res : (res?.items || res?.data || []);
+  const rows = await apiFetch(zapGet, { method: "GET" });
+  if (Array.isArray(rows)) return rows;
+  if (rows && Array.isArray(rows.items)) return rows.items;
+  if (rows && Array.isArray(rows.data)) return rows.data;
+  if (rows && typeof rows === "object") {
+    for (const k of Object.keys(rows)) if (Array.isArray(rows[k])) return rows[k];
+  }
+  return [];
 }
 
-// Patch/update a single row via Zapier webhook.
-// The Zap must accept a JSON body: { id: "<row id>", fields: { key: value, ... } }
-// and return the updated row object
-async function patchRowToBackend(rowId, fields) {
+// Patch/update a single row via Zapier PATCH webhook.
+// POST body: { id: "<row id>", fields: { key: value, ... } }
+// Response: updated row object
+async function patchRowToZapier(rowId, fields) {
   const zapPatch = getZapierTablePatchUrl();
-  if (zapPatch) {
-    const payload = { id: rowId, fields };
-    const updated = await apiFetch(zapPatch, { method: "POST", body: payload });
-    return updated;
-  }
+  if (!zapPatch) throw new Error("Missing ZAPIER_TABLE_PATCH_URL. Set window.APP_CONFIG.ZAPIER_TABLE_PATCH_URL or sessionStorage key.");
 
-  // fallback to Xano PATCH
-  const updated = await xanoFetch(`${XANO_TABLE_PATH}/${encodeURIComponent(rowId)}`, {
-    method: "PATCH",
-    body: fields,
-    withEditKey: true
-  });
+  const payload = { id: rowId, fields };
+  const updated = await apiFetch(zapPatch, { method: "POST", body: payload });
   return updated;
 }
 
-// fetch edit key — tries Zapier config webhook first, falls back to Xano config table
-async function fetchEditKeyFromXano() {
-  try {
-    const cfgUrl = getZapierConfigGetUrl();
-    if (cfgUrl) {
+// Fetch edit key from Zapier config endpoint (optional)
+async function fetchEditKeyFromZapier() {
+  const cfgUrl = getZapierConfigGetUrl();
+  if (cfgUrl) {
+    try {
       const cfg = await apiFetch(cfgUrl, { method: "GET" });
       const rows = Array.isArray(cfg) ? cfg : (cfg?.items || cfg?.data || []);
-      // if rows array: find key row
       if (Array.isArray(rows)) {
-        const row = rows.find(r => String(r.key || "").trim() === EDIT_KEY_NAME);
+        const row = rows.find(r => String(r.key || "").trim() === "EDIT_KEY");
         const value = row?.value;
-        if (value !== null && value !== undefined) {
-          const s = String(value).trim();
-          return s.length ? s : null;
-        }
+        if (value !== undefined && value !== null) return String(value).trim() || null;
       }
-      // if object mapping present
-      if (cfg && typeof cfg === "object" && cfg[EDIT_KEY_NAME] !== undefined) {
-        const v = cfg[EDIT_KEY_NAME];
-        const s = String(v || "").trim();
-        return s.length ? s : null;
+      if (cfg && typeof cfg === "object" && cfg.EDIT_KEY !== undefined) {
+        return String(cfg.EDIT_KEY || "").trim() || null;
       }
+    } catch (e) {
+      console.warn("fetchEditKeyFromZapier failed:", e);
     }
-  } catch (e) {
-    console.warn("fetchEditKeyFromZapier failed:", e);
   }
-
-  // fallback to original Xano config fetch
-  try {
-    const res = await xanoFetch(XANO_CONFIG_PATH, { method: "GET", withEditKey: false });
-    const rows = Array.isArray(res) ? res : (res?.items || res?.data || []);
-    const row = rows.find(r => String(r.key || "").trim() === EDIT_KEY_NAME);
-    const value = row?.value;
-    if (value === null || value === undefined) return null;
-    const s = String(value).trim();
-    return s.length ? s : null;
-  } catch (err) {
-    console.warn("fetchEditKeyFromXano fallback failed:", err);
-    return null;
-  }
+  return null;
 }
 
 async function verifyPassword(pw) {
-  const actual = await fetchEditKeyFromXano();
+  const actual = await fetchEditKeyFromZapier();
   if (!actual) return false;
   const entered = String(pw || "").trim();
   if (!entered) return false;
@@ -742,7 +650,7 @@ function openEditMetricModal({ row, fieldKey, fieldLabel, currentValue, monthKey
 
   const backdrop = document.getElementById("editMetricModalBackdrop");
   document.getElementById("editMetricSubtitle").textContent = `${row.company} • ${monthKey} • ${fieldLabel}`;
-  document.getElementById("editMetricHint").textContent = "This updates the value in backend.";
+  document.getElementById("editMetricHint").textContent = "This updates the value in Zapier Table.";
 
   const input = document.getElementById("editMetricNewValue");
   input.value = (currentValue === null || currentValue === undefined) ? "" : String(currentValue);
@@ -852,11 +760,10 @@ function wireEditModals() {
         return;
       }
 
-      // Use Zapier patch adapter (or Xano fallback)
-      await patchRowToBackend(rowId, body);
+      await patchRowToZapier(rowId, body);
 
       closeEditMetricModal();
-      await reloadFromXanoAndRefresh();
+      await reloadFromZapierAndRefresh();
     } catch (err) {
       alert(`Save failed: ${String(err?.message || err)}`);
     } finally {
@@ -880,10 +787,10 @@ function wireEditModals() {
         const rowId = getRowId(row);
         if (!rowId) return alert("Missing record id.");
 
-        await patchRowToBackend(rowId, { monthly_press_coverage: payloadVal });
+        await patchRowToZapier(rowId, { monthly_press_coverage: payloadVal });
 
         closeEditTextModal();
-        await reloadFromXanoAndRefresh();
+        await reloadFromZapierAndRefresh();
         return;
       }
 
@@ -892,10 +799,10 @@ function wireEditModals() {
         const rowId = getRowId(row);
         if (!rowId) return alert("Missing record id.");
 
-        await patchRowToBackend(rowId, { [NOTES_FIELD_KEY]: payloadVal });
+        await patchRowToZapier(rowId, { [NOTES_FIELD_KEY]: payloadVal });
 
         closeEditTextModal();
-        await reloadFromXanoAndRefresh();
+        await reloadFromZapierAndRefresh();
         return;
       }
     } catch (err) {
@@ -932,7 +839,7 @@ function averageNumericForCompanyAcrossMonths(companyName, monthKeys, fieldKey) 
 }
 
 // -------------------------
-// Table rendering
+// Table rendering (unchanged)
 // -------------------------
 function buildMetricsTable(visibleMonths, companies) {
   const table = el("table");
@@ -1056,7 +963,7 @@ function buildMetricsTable(visibleMonths, companies) {
 }
 
 // -------------------------
-// Chart.js
+// Chart.js (unchanged)
 // -------------------------
 let metricChart = null;
 
@@ -1166,7 +1073,7 @@ function renderChart() {
 }
 
 // -------------------------
-// Styling
+// Styling (unchanged)
 // -------------------------
 function applyMetricsTableStyling() {
   const root = document.getElementById("metricsDisplay");
@@ -1194,14 +1101,14 @@ function applyMetricsTableStyling() {
 }
 
 // -------------------------
-// Refresh / reload
+// Refresh / reload (Zapier)
 // -------------------------
 function refresh() {
   const mount = document.getElementById("metricsDisplay");
   mount.innerHTML = "";
 
   if (!state.latestMonthKey) {
-    mount.appendChild(el("p", { className: "muted", text: "No data found in backend." }));
+    mount.appendChild(el("p", { className: "muted", text: "No data found in Zapier Table." }));
     destroyChart();
     return;
   }
@@ -1210,7 +1117,7 @@ function refresh() {
   const selected = uniqueCompanies(state.rows).filter(c => state.selectedCompanies.has(c));
 
   document.getElementById("lastUpdated").textContent =
-    `Loaded from backend. Latest month: ${state.latestMonthKey}. Viewing: ${visibleMonths.join(", ")}.`;
+    `Loaded from Zapier Table. Latest month: ${state.latestMonthKey}. Viewing: ${visibleMonths.join(", ")}.`;
   setLastUpdatedAtText();
 
   if (!selected.length) {
@@ -1225,9 +1132,8 @@ function refresh() {
   applyMetricsTableStyling();
 }
 
-async function reloadFromXanoAndRefresh() {
-  // fetch rows from Zapier (or fallback to Xano)
-  const rawRows = await fetchRowsFromBackend();
+async function reloadFromZapierAndRefresh() {
+  const rawRows = await fetchRowsFromZapier();
   const raw = Array.isArray(rawRows) ? rawRows : (rawRows?.items || rawRows?.data || []);
   state.rows = raw.map(normalizeRow);
 
@@ -1274,160 +1180,51 @@ async function attemptUnlock(password) {
   setEditKey(password);
   const ok = await verifyPassword(password);
   if (!ok) return false;
-  await reloadFromXanoAndRefresh();
+  await reloadFromZapierAndRefresh();
   return true;
 }
 
 // -------------------------
-// Time range helpers already exist (setQuickThisMonth, setQuickLastMonth) - ensure they're present
-function fillMonthSelect(selectEl) {
-  selectEl.innerHTML = "";
-  for (const m of MONTH_LABELS) {
-    const opt = document.createElement("option");
-    opt.value = m.value;
-    opt.textContent = m.name;
-    selectEl.appendChild(opt);
-  }
-}
-
-function fillYearSelect(selectEl, minYear, maxYear) {
-  selectEl.innerHTML = "";
-  for (let y = minYear; y <= maxYear; y++) {
-    const opt = document.createElement("option");
-    opt.value = String(y);
-    opt.textContent = String(y);
-    selectEl.appendChild(opt);
-  }
-}
-
-function setRangeSelectorsFromKeys(startKey, endKey) {
-  const s = parseMonthKey(startKey);
-  const e = parseMonthKey(endKey);
-  if (!s || !e) return;
-  document.getElementById("startYear").value = String(s.year);
-  document.getElementById("startMonth").value = s.month;
-  document.getElementById("endYear").value = String(e.year);
-  document.getElementById("endMonth").value = e.month;
-}
-
-function applyCustomRangeFromSelectors_v2() {
-  // kept for backwards compatibility if needed; uses the main function
-  return applyCustomRangeFromSelectors();
-}
-
-function setQuickThisMonth() {
-  document.getElementById("quickLastMonth").checked = false;
-  const key = currentMonthKeyUTC();
-  state.rangeStartKey = key;
-  state.rangeEndKey = key;
-  state.visibleMonths = [key];
-  setRangeSelectorsFromKeys(key, key);
-  refresh();
-}
-
-function setQuickLastMonth() {
-  document.getElementById("quickThisMonth").checked = false;
-  const thisKey = currentMonthKeyUTC();
-  const lastKey = previousMonthKeyUTC(thisKey);
-  state.rangeStartKey = lastKey;
-  state.rangeEndKey = lastKey;
-  state.visibleMonths = [lastKey];
-  setRangeSelectorsFromKeys(lastKey, lastKey);
-  refresh();
-}
-
+// Collect action: trigger Zapier catch hook (starts scraping in Zapier/other)
 // -------------------------
-// New: Dispatch + Poll flow (Option B)
-// -------------------------
-// Keep original Xano dispatch flow intact (you can migrate later)
-async function triggerCollectDispatch({ test = false } = {}) {
+async function triggerCollectViaZapier({ test = false } = {}) {
+  const hook = getZapierHook();
+  if (!hook) throw new Error("Missing ZAPIER_CATCH_HOOK_URL. Configure window.APP_CONFIG.ZAPIER_CATCH_HOOK_URL or sessionStorage key.");
+
   const mk = lastMonthKeyUtcYYYYMM() || currentMonthKeyUTC();
-  const parts = String(mk).split("-").map(s => s.trim());
-  let year = String(new Date().getUTCFullYear());
-  let month = String(new Date().getUTCMonth() + 1).padStart(2, "0");
-  if (parts.length === 2) {
-    year = String(parts[0]);
-    month = String(parts[1]).padStart(2, "0");
-  }
-
+  // payload for scraper - you can adapt fields as your Zap expects
   const payload = {
-    year: Number(year),
-    month: String(month).padStart(2, "0"),
-    month_key: `${String(year)}-${String(month).padStart(2, "0")}`,
+    action: "collect_last_month",
+    month_key: mk,
     test: !!test
   };
 
-  const res = await xanoFetch("/trigger_collect", { method: "POST", body: payload, withEditKey: true });
-  if (!res || !res.ok || !res.run_id) {
-    throw new Error(`Dispatch failed: ${JSON.stringify(res)}`);
-  }
-  return res.run_id;
-}
+  const res = await fetch(hook, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
 
-// Poll run status until finished, then refresh dashboard. Expects Xano GET /run_status/:run_id
-async function pollRunAndRefresh(runId, { intervalMs = 5000, timeoutMs = 5 * 60 * 1000 } = {}) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const status = await xanoFetch(`/run_status/${encodeURIComponent(runId)}`, { method: "GET", withEditKey: true });
-      if (status && status.finished) {
-        if (status.success) {
-          try { await reloadFromXanoAndRefresh(); } catch (e) { console.warn("Refresh failed after run completion:", e); }
-          return { ok: true, status };
-        } else {
-          return { ok: false, status };
-        }
-      }
-    } catch (err) {
-      console.warn("pollRunAndRefresh transient error:", err);
-    }
-    await new Promise((r) => setTimeout(r, intervalMs));
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new Error(`Zapier hook failed (${res.status}): ${t || res.statusText}`);
   }
-  return { ok: false, error: "timeout" };
+
+  return await res.json().catch(() => ({}));
 }
 
 // -------------------------
-// Collect action: legacy Zapier trigger (kept for backwards compatibility)
+// Test button: sends a test payload to Zapier catch hook
 // -------------------------
-async function triggerZapierCollectAgencyFeeSwiisLastMonth() {
-  const hook = getZapierHook();
-  if (hook) {
-    const payload = {
-      action: "collect_agency_fees",
-      company: "SWIIS",
-      month_key: lastMonthKeyUtcYYYYMM(),
-      source_url: "https://www.swiisfostercare.com/fostering/fostering-allowance-pay/"
-    };
-
-    const res = await fetch(hook, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-
-    if (!res.ok) {
-      const t = await res.text().catch(() => "");
-      throw new Error(`Zapier hook failed (${res.status}): ${t || res.statusText}`);
-    }
-    return;
-  }
-
-  throw new Error("Missing ZAPIER_CATCH_HOOK_URL. Configure assets/config.js or set sessionStorage key 'ZAPIER_CATCH_HOOK_URL'.");
-}
-
-// -------------------------
-// Test button: use the Xano dispatch (test mode)
 async function sendTestPayloadToZapier() {
   const btn = document.getElementById("testZapBtn");
   const prevText = btn ? btn.textContent : null;
   try {
     if (btn) { btn.disabled = true; btn.textContent = "Sending test..."; }
 
-    // Trigger the same Xano dispatch endpoint but flag it as a test
-    const runId = await triggerCollectDispatch({ test: true });
+    await triggerCollectViaZapier({ test: true });
 
-    alert("Test dispatch started. Run ID: " + runId + ". The scraper will run in GitHub Actions and post results to Xano.");
-    console.log("Test dispatch started, runId:", runId);
+    alert("Test dispatch sent to Zapier. Wait a few seconds and click Refresh to load results from Zapier Table.");
   } catch (err) {
     alert("Test failed: " + String(err?.message || err));
     console.error(err);
@@ -1447,7 +1244,7 @@ async function init() {
   const chartSelect = document.getElementById("chartMetricSelect");
   if (chartSelect) chartSelect.addEventListener("change", renderChart);
 
-  // Collect data button
+  // Collect data button: trigger Zapier collect hook
   const collectBtn = document.getElementById("collectDataBtn");
   if (collectBtn) {
     collectBtn.addEventListener("click", async () => {
@@ -1455,20 +1252,19 @@ async function init() {
 
       try {
         collectBtn.disabled = true;
-        collectBtn.textContent = "Collecting...";
+        collectBtn.textContent = "Triggering...";
 
-        // Dispatch scraper via Xano -> GitHub Actions
-        const runId = await triggerCollectDispatch();
-        console.log("Dispatched scraper run:", runId);
-
-        // Poll for completion and refresh dashboard
-        const pollResult = await pollRunAndRefresh(runId, { intervalMs: 5000, timeoutMs: 5 * 60 * 1000 });
-        if (pollResult.ok) {
-          alert("Collect complete — dashboard updated.");
-        } else {
-          console.warn("Collect finished with error/timeout:", pollResult);
-          alert("Collect finished with a problem (see console). You can refresh manually later.");
-        }
+        await triggerCollectViaZapier();
+        // Give Zapier a moment to run the scrape & update table; then reload.
+        setTimeout(async () => {
+          try {
+            await reloadFromZapierAndRefresh();
+            alert("Collect triggered and Zapier Table reloaded (if Zap completed).");
+          } catch (e) {
+            console.warn("Reload after collect failed:", e);
+            alert("Collect triggered. Refresh the page after a moment to see updates.");
+          }
+        }, 8000);
       } catch (err) {
         alert(String(err?.message || err));
       } finally {
@@ -1478,7 +1274,7 @@ async function init() {
     });
   }
 
-  // Test Zap button wiring (now triggers Xano test dispatch)
+  // Test Zap button
   const testBtn = document.getElementById("testZapBtn");
   if (testBtn) testBtn.addEventListener("click", sendTestPayloadToZapier);
 
