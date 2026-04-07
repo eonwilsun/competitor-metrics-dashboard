@@ -1,6 +1,5 @@
-// app.js - Full replacement with built-in debug overlay
-// Zapier primary for data (GET + PATCH); Xano only for edit-key + dispatch fallback.
-// Configure via window.APP_CONFIG or sessionStorage. See runtime keys in header comments.
+// app.js - Full replacement with Zapier primary backend, Xano fallback, and a Debug overlay.
+// Replace your deployed assets/app.js with this file and hard-refresh (Ctrl/Cmd+Shift+R).
 
 // -------------------------
 // Session / Edit Key helpers
@@ -42,7 +41,7 @@ const XANO_CONFIG_PATH = "/app_config";
 const EDIT_KEY_NAME = "EDIT_KEY";
 
 // -------------------------
-// UI constants
+// UI / Metrics constants
 const METRIC_FIELDS = [
   { key: "domain_authority", label: "Authority Score", format: "int" },
   { key: "number_of_referring_domains", label: "Referring Domains", format: "int" },
@@ -79,11 +78,11 @@ const CHART_METRICS = [
 function normalizeCompanyName(name) { return String(name || "").trim(); }
 function companySort(a, b) { const aa = normalizeCompanyName(a); const bb = normalizeCompanyName(b); const aIsSwiis = aa.toLowerCase() === "swiis"; const bIsSwiis = bb.toLowerCase() === "swiis"; if (aIsSwiis && !bIsSwiis) return -1; if (!aIsSwiis && bIsSwiis) return 1; return aa.localeCompare(bb); }
 const COMPANY_COLORS = { swiis:"#ef5d2f", capstone:"#0d66a2", compass:"#1897d3", fca:"#f27a30", nfa:"#f9ae42", "orange grove":"#51277d", orangegrove:"#51277d", tact:"#b22288" };
-function companyColor(company) { const key = normalizeCompanyName(company).toLowerCase(); if (COMPANY_COLORS[key]) return COMPANY_COLORS[key]; let hash = 0; for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0; return `hsl(${hash % 360}, 70%, 45%)`; }
+function companyColor(company) { const key = normalizeCompanyName(company).toLowerCase(); if (COMPANY_COLORS[key]) return COMPANY_COLORS[key]; let hash = 0; for (let i=0;i<key.length;i++) hash=(hash*31+key.charCodeAt(i))>>>0; return `hsl(${hash%360},70%,45%)`; }
 
 // -------------------------
 // DOM + formatting helpers
-function el(tag, attrs = {}, children = []) { const node = document.createElement(tag); for (const [k, val] of Object.entries(attrs)) { if (k === "className") node.className = val; else if (k === "text") node.textContent = val; else if (k === "html") node.innerHTML = val; else node.setAttribute(k, val); } for (const c of children) node.appendChild(c); return node; }
+function el(tag, attrs = {}, children = []) { const node = document.createElement(tag); for (const [k,val] of Object.entries(attrs)) { if (k==="className") node.className = val; else if (k==="text") node.textContent = val; else if (k==="html") node.innerHTML = val; else node.setAttribute(k, val); } for (const c of children) node.appendChild(c); return node; }
 function toNumberOrNull(v){ if (v===null||v===undefined||v==="") return null; const n=Number(v); return Number.isNaN(n)?null:n; }
 function normalizeText(v){ if (v===null||v===undefined) return null; const s=String(v).trim(); return s.length ? s : null; }
 function escapeHtml(s){ return String(s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;"); }
@@ -241,7 +240,7 @@ function getRowId(row) { const id = row?.id ?? row?.competitor_metrics_dashboard
 function buildPatchBodyForMetric(row, fieldKey, rawNum) { const num = Number(rawNum); if (fieldKey === "agency_fee_one_child_weekly" || fieldKey === "agency_fee_one_child_yearly") { const rootKey = "agency_fee_one_child"; const childKey = fieldKey==="agency_fee_one_child_weekly" ? "Weekly" : "Yearly"; const current = (row && typeof row[rootKey]==="object"&&row[rootKey])?row[rootKey]:{}; return { [rootKey]: { ...current, [childKey]: Math.round(num) } }; } if (fieldKey === "posts_images" || fieldKey === "posts_reels") { const rootKey = "number_of_monthly_instagram_posts"; const current=(row&&typeof row[rootKey]==="object"&&row[rootKey])?row[rootKey]:{}; const next={...current}; if(fieldKey==="posts_images") next.image_graphic=Math.round(num); if(fieldKey==="posts_reels") next.reels_video=Math.round(num); next.number_of_monthly_instagram_posts_total=(toNumberOrNull(next.image_graphic)||0)+(toNumberOrNull(next.reels_video)||0); return { [rootKey]: next }; } if (fieldKey==="posts_total") return null; if (fieldKey==="engagement_total"||fieldKey==="engagement_rate_percentage"){ const rootKey="monthly_instagram_engagement"; const current=(row&&typeof row[rootKey]==="object"&&row[rootKey])?row[rootKey]:{}; const next={...current}; if(fieldKey==="engagement_total") next.total_engagement=Math.round(num); if(fieldKey==="engagement_rate_percentage") next.engagement_rate_percentage=num; return { [rootKey]: next }; } return { [fieldKey]: Math.round(num) }; }
 
 // -------------------------
-// Missing month helpers (ensure present)
+// Month helpers & compute helpers
 const MONTHS = { january:"01", february:"02", march:"03", april:"04", may:"05", june:"06", july:"07", august:"08", september:"09", october:"10", november:"11", december:"12" };
 const MONTH_LABELS = [ {name:"January",value:"01"},{name:"February",value:"02"},{name:"March",value:"03"},{name:"April",value:"04"},{name:"May",value:"05"},{name:"June",value:"06"},{name:"July",value:"07"},{name:"August",value:"08"},{name:"September",value:"09"},{name:"October",value:"10"},{name:"November",value:"11"},{name:"December",value:"12"} ];
 
@@ -254,7 +253,6 @@ function currentMonthKeyUTC(){ const now=new Date(); return `${now.getUTCFullYea
 function previousMonthKeyUTC(monthKey){ const p=parseMonthKey(monthKey); if(!p) return null; const dt=new Date(Date.UTC(p.year, Number(p.month)-1,1)); dt.setUTCMonth(dt.getUTCMonth()-1); return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth()+1).padStart(2,"0")}`; }
 function lastMonthKeyUtcYYYYMM(){ return previousMonthKeyUTC(currentMonthKeyUTC()); }
 
-// computeLatestMonthKey & computeMinMaxMonthKey (restored / safe)
 function computeLatestMonthKey(rows) {
   const keys = (Array.isArray(rows) ? rows : [])
     .map(r => monthKeyFromYearMonthName(r.year, r.month))
@@ -271,222 +269,448 @@ function computeMinMaxMonthKey(rows) {
 }
 
 // -------------------------
-// Chart + UI functions (rendering, modals, wiring)
-// (kept same as original - omitted here for brevity in explanation; included below)
-let metricChart = null;
-function ensureChartMetricOptions(force=false){ const sel=document.getElementById("chartMetricSelect"); if(!sel) return; if(force||sel.options.length===0){ const prev=sel.value; sel.innerHTML=""; for(const m of CHART_METRICS){ const opt=document.createElement("option"); opt.value=m.key; opt.textContent=m.label; sel.appendChild(opt);} const want = prev && CHART_METRICS.some(x=>x.key===prev) ? prev : (CHART_METRICS[0]?.key||""); if(want) sel.value=want; } }
-function destroyChart(){ if(metricChart){ metricChart.destroy(); metricChart=null; } }
-function getNumericMetricValue(row, metricKey){ if(!row) return null; if(metricKey==="number_of_monthly_instagram_posts") return extractPostsTotal(row.number_of_monthly_instagram_posts); if(metricKey==="monthly_instagram_engagement") return extractEngagementTotal(row.monthly_instagram_engagement); return toNumberOrNull(row[metricKey]); }
-function extractPostsTotal(obj){ if(!obj||typeof obj!=="object") return toNumberOrNull(obj); return toNumberOrNull(obj.number_of_monthly_instagram_posts_total ?? obj.Total ?? obj.total ?? obj.total_posts); }
-function extractEngagementTotal(obj){ if(!obj||typeof obj!=="object") return toNumberOrNull(obj); return toNumberOrNull(obj.total_engagement ?? obj.Total ?? obj.total ?? obj.totalEngagement); }
+// Chart / render / UI functions (complete)
+// Note: these are the full implementations used by the app (kept functionally identical to your original UI logic).
+let editModalState = null, editTextModalState = null, editNotesModalState = null;
 
-// (The rest of the UI code follows — table rendering, modals, styling, download, etc.)
-// For brevity I'm including the rest of the UI functions in compact form (the same behavior as your original).
-// [The code is long; ensure you paste the full original UI sections here in your deployed file — they are included in this file.]
-
-// ---------- We'll now add the Debug UI (button + overlay) ----------
-
-function createDebugUI() {
-  // Only create once
-  if (document.getElementById("appDebugBtn")) return;
-
-  // Styles
-  const style = document.createElement("style");
-  style.textContent = `
-#appDebugBtn { position: fixed; left: 12px; bottom: 12px; z-index: 99999; background:#111; color:#fff; border-radius:6px; padding:8px 10px; font-family:system-ui,-apple-system,Segoe UI,Roboto; cursor:pointer; opacity:0.9; }
-#appDebugPanel { position: fixed; left: 12px; bottom: 56px; width: 420px; max-height: 70vh; overflow:auto; z-index:99999; background: #fff; color:#111; border: 1px solid #ddd; border-radius:8px; box-shadow:0 6px 30px rgba(0,0,0,0.12); font-family: system-ui,-apple-system,Segoe UI,Roboto; padding:12px; display:none; }
-#appDebugPanel pre { white-space: pre-wrap; font-size:12px; line-height:1.25; }
-#appDebugPanel h4 { margin:0 0 6px 0; font-size:13px; }
-#appDebugPanel .dbg-row { margin-bottom:8px; }
-#appDebugActions button { margin-right:6px; }
-`;
-  document.head.appendChild(style);
-
-  // Button
-  const btn = document.createElement("button");
-  btn.id = "appDebugBtn";
-  btn.textContent = "Debug";
-  document.body.appendChild(btn);
-
-  // Panel
-  const panel = document.createElement("div");
-  panel.id = "appDebugPanel";
-  panel.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-      <h4>App Debug</h4>
-      <div>
-        <button id="appDbgRun" style="margin-right:6px">Run Checks</button>
-        <button id="appDbgClose">Close</button>
-      </div>
-    </div>
-    <div id="appDbgOut"><pre>Ready. Click "Run Checks".</pre></div>
-    <div id="appDbgExtra" style="margin-top:8px;font-size:12px;color:#666"></div>
-  `;
-  document.body.appendChild(panel);
-
-  btn.addEventListener("click", () => {
-    panel.style.display = panel.style.display === "none" ? "block" : "none";
-  });
-
-  document.getElementById("appDbgClose").addEventListener("click", () => panel.style.display = "none");
-
-  async function runChecks() {
-    const outEl = document.getElementById("appDbgOut");
-    function logLine(s){ outEl.innerHTML += `\n${s.replace(/\n/g, "\n")}`; }
-    outEl.innerHTML = "<pre>Running checks...\n</pre>";
-    try {
-      // Basic typeof checks
-      const names = ["init","wireEditModals","fetchRowsFromBackend","patchRowToBackend","fetchEditKeyFromXano","verifyPassword","computeLatestMonthKey","computeMinMaxMonthKey"];
-      for (const n of names) {
-        const t = (typeof window[n] === "function") ? "function" : (typeof window[n]);
-        logLine(`${n}: ${t}`);
-      }
-
-      // Try fetchEditKeyFromXano
-      if (typeof fetchEditKeyFromXano === "function") {
-        logLine("\nFetching EDIT_KEY (timeout 6s)...");
-        try {
-          const p = fetchEditKeyFromXano();
-          const val = await Promise.race([p, new Promise((_,r)=>setTimeout(()=>r(new Error("timeout")),6000))]);
-          logLine("EDIT_KEY: " + JSON.stringify(val));
-        } catch (e) {
-          logLine("EDIT_KEY fetch error: " + String(e));
-        }
-      } else logLine("fetchEditKeyFromXano not available.");
-
-      // Try fetchRowsFromBackend
-      if (typeof fetchRowsFromBackend === "function") {
-        logLine("\nFetching rows (timeout 8s)...");
-        try {
-          const start = Date.now();
-          const pRows = fetchRowsFromBackend();
-          const rows = await Promise.race([pRows, new Promise((_,r)=>setTimeout(()=>r(new Error("timeout")),8000))]);
-          const took = Date.now() - start;
-          logLine(`Rows fetched: ${Array.isArray(rows) ? rows.length : typeof rows} (took ${took}ms)`);
-          if (Array.isArray(rows) && rows.length) {
-            logLine("Sample row keys: " + Object.keys(rows[0]).slice(0,12).join(", "));
-          } else {
-            logLine("Rows body preview: " + JSON.stringify(rows).slice(0,400));
-          }
-        } catch (e) {
-          logLine("Rows fetch error: " + String(e));
-        }
-      } else logLine("fetchRowsFromBackend not available.");
-
-      logLine("\nDone.");
-    } catch (err) {
-      outEl.innerHTML += `\nError running checks: ${String(err)}`;
+function ensureChartMetricOptions(force = false) {
+  const sel = document.getElementById("chartMetricSelect");
+  if (!sel) return;
+  if (force || sel.options.length === 0) {
+    const prev = sel.value;
+    sel.innerHTML = "";
+    for (const m of CHART_METRICS) {
+      const opt = document.createElement("option");
+      opt.value = m.key;
+      opt.textContent = m.label;
+      sel.appendChild(opt);
     }
+    const want = prev && CHART_METRICS.some(x => x.key === prev) ? prev : (CHART_METRICS[0]?.key || "");
+    if (want) sel.value = want;
   }
-
-  document.getElementById("appDbgRun").addEventListener("click", runChecks);
 }
 
-// Add debug UI as soon as possible
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", createDebugUI);
-} else {
-  setTimeout(createDebugUI, 0);
+function destroyChart() { if (metricChart) { metricChart.destroy(); metricChart = null; } }
+
+function getNumericMetricValue(row, metricKey) {
+  if (!row) return null;
+  if (metricKey === "number_of_monthly_instagram_posts") return extractPostsTotal(row.number_of_monthly_instagram_posts);
+  if (metricKey === "monthly_instagram_engagement") return extractEngagementTotal(row.monthly_instagram_engagement);
+  return toNumberOrNull(row[metricKey]);
+}
+
+function renderChart() {
+  const canvas = document.getElementById("metricChart");
+  const sel = document.getElementById("chartMetricSelect");
+  const modeLabel = document.getElementById("chartModeLabel");
+  if (!canvas || !sel || typeof Chart === "undefined") return;
+  if (sel.options.length === 0) ensureChartMetricOptions(true);
+  const metricKey = sel.value;
+  if (!metricKey) return;
+  const metricLabel = CHART_METRICS.find(m => m.key === metricKey)?.label || metricKey;
+  const visibleMonths = state.visibleMonths.length ? state.visibleMonths : (state.latestMonthKey ? [state.latestMonthKey] : []);
+  if (!visibleMonths.length) return;
+  const singleMonth = visibleMonths.length === 1;
+  const companies = uniqueCompanies(state.rows).filter(c => state.selectedCompanies.has(c));
+  if (modeLabel) {
+    modeLabel.textContent = singleMonth
+      ? `(Bar • ${visibleMonths[0]})`
+      : `(Line • ${visibleMonths[0]} → ${visibleMonths[visibleMonths.length - 1]})`;
+  }
+  destroyChart();
+  if (singleMonth) {
+    const mk = visibleMonths[0];
+    const values = companies.map(c => getNumericMetricValue(findRowByCompanyAndMonth(c, mk), metricKey) ?? 0);
+    const colors = companies.map(companyColor);
+    metricChart = new Chart(canvas, {
+      type: "bar",
+      data: { labels: companies, datasets: [{ label: metricLabel, data: values, backgroundColor: colors }] },
+      options: { responsive: true, plugins: { legend: { display: true } }, scales: { y: { beginAtZero: true } } }
+    });
+  } else {
+    const datasets = companies.map((c) => {
+      const data = visibleMonths.map(mk => getNumericMetricValue(findRowByCompanyAndMonth(c, mk), metricKey) ?? 0);
+      const color = companyColor(c);
+      return { label: c, data, tension: 0.25, borderColor: color, backgroundColor: color };
+    });
+    metricChart = new Chart(canvas, {
+      type: "line",
+      data: { labels: visibleMonths, datasets },
+      options: { responsive: true, plugins: { legend: { display: true } }, scales: { y: { beginAtZero: true } } }
+    });
+  }
+}
+
+function formatValue(v, format) {
+  if (v === null || v === undefined || v === "") return "—";
+  if (format === "int") { const n = Number(v); if (!Number.isFinite(n)) return "—"; return Math.round(n).toLocaleString(); }
+  if (format === "float") { const n = Number(v); if (!Number.isFinite(n)) return "—"; const fixed = n.toFixed(2); return fixed.replace(/\.00$/, "").replace(/(\.\d)0$/, "$1"); }
+  return String(v);
+}
+
+function buildMetricsTable(visibleMonths, companies) {
+  const table = el("table");
+  const thead = el("thead");
+  const trh = el("tr");
+  trh.appendChild(el("th", { text: "Company" }));
+  trh.appendChild(el("th", { text: "Month(s)" }));
+  for (const f of METRIC_FIELDS) trh.appendChild(el("th", { text: f.label }));
+  trh.appendChild(el("th", { text: "Notes" }));
+  thead.appendChild(trh); table.appendChild(thead);
+  const tbody = el("tbody");
+  const singleMonth = visibleMonths.length === 1;
+  for (const companyName of companies) {
+    const tr = el("tr");
+    tr.appendChild(el("td", { text: companyName }));
+    tr.appendChild(el("td", { text: singleMonth ? visibleMonths[0] : `${visibleMonths.length} months` }));
+    for (const f of METRIC_FIELDS) {
+      let displayValue = null, editTargetRow = null, editMonthKey = null;
+      if (singleMonth) { editMonthKey = visibleMonths[0]; editTargetRow = findRowByCompanyAndMonth(companyName, editMonthKey); displayValue = editTargetRow ? editTargetRow[f.key] : null; }
+      else { if (f.format === "int" || f.format === "float") displayValue = averageNumericForCompanyAcrossMonths(companyName, visibleMonths, f.key); else displayValue = null; }
+      const td = el("td");
+      if (f.format === "richtext") {
+        const html = displayValue ? linkifyTextToHtml(displayValue) : "—";
+        const div = el("div", { className: `clickable-metric metrics-rich${(!displayValue ? " muted-cell" : "")}`, html, title: singleMonth ? "Click to edit" : "Shown only in single-month view" });
+        if (singleMonth && editTargetRow && f.editable) div.addEventListener("click", (e) => { if (e.target && e.target.closest && e.target.closest("a")) return; openEditTextModal({ row: editTargetRow, fieldKey: f.key, fieldLabel: f.label, currentValue: editTargetRow[f.key], monthKey: editMonthKey }); });
+        td.appendChild(div); tr.appendChild(td); continue;
+      }
+      const isEmpty = displayValue === null || displayValue === undefined || displayValue === "";
+      const span = el("span", { className: `clickable-metric metrics-num${isEmpty ? " muted-cell" : ""}`, text: formatValue(displayValue, f.format), title: singleMonth ? (f.readOnly ? "Derived (edit Images/Reels)" : "Click to edit") : "Averaged across selected months" });
+      if (singleMonth && editTargetRow && !f.readOnly) span.addEventListener("click", () => openEditMetricModal({ row: editTargetRow, fieldKey: f.key, fieldLabel: f.label, currentValue: editTargetRow[f.key], monthKey: editMonthKey }));
+      td.appendChild(span); tr.appendChild(td);
+    }
+    const notesTd = el("td"); let notesRow = null, mk = null; if (singleMonth) { mk = visibleMonths[0]; notesRow = findRowByCompanyAndMonth(companyName, mk); }
+    const notesText = singleMonth ? (notesRow?.[NOTES_FIELD_KEY] ?? "") : "";
+    const notesPreview = normalizeText(notesText) ? linkifyTextToHtml(notesText) : "—";
+    const notesDiv = el("div", { className: `clickable-metric metrics-rich${(normalizeText(notesText) ? "" : " muted-cell")}`, html: notesPreview, title: singleMonth ? "Click to edit notes" : "Switch to a single month to edit notes" });
+    if (singleMonth && notesRow) notesDiv.addEventListener("click", (e) => { if (e.target && e.target.closest && e.target.closest("a")) return; openEditNotesModal({ row: notesRow, monthKey: mk }); });
+    notesTd.appendChild(notesDiv); tr.appendChild(notesTd); tbody.appendChild(tr);
+  }
+  table.appendChild(tbody); return table;
+}
+
+/* ---------- Modals wiring (fully defined) ---------- */
+function openEditMetricModal({ row, fieldKey, fieldLabel, currentValue, monthKey }) {
+  editModalState = { row, fieldKey, monthKey };
+  const backdrop = document.getElementById("editMetricModalBackdrop"); if (!backdrop) return;
+  document.getElementById("editMetricSubtitle").textContent = `${row.company} • ${monthKey} • ${fieldLabel}`;
+  document.getElementById("editMetricHint").textContent = "This updates the value in backend.";
+  const input = document.getElementById("editMetricNewValue");
+  if (input) input.value = (currentValue === null || currentValue === undefined) ? "" : String(currentValue);
+  backdrop.style.display = "flex"; backdrop.setAttribute("aria-hidden", "false"); setTimeout(() => input && input.focus(), 0);
+}
+function closeEditMetricModal() { const b = document.getElementById("editMetricModalBackdrop"); if (!b) return; b.style.display = "none"; b.setAttribute("aria-hidden", "true"); editModalState = null; }
+function openEditTextModal({ row, fieldKey, fieldLabel, currentValue, monthKey }) {
+  editTextModalState = { row, fieldKey, monthKey };
+  const b = document.getElementById("editTextModalBackdrop"); if (!b) return;
+  document.getElementById("editTextSubtitle").textContent = `${row.company} • ${monthKey} • ${fieldLabel}`;
+  document.getElementById("editTextHint").textContent = "Multiple lines supported. Ctrl+Enter saves.";
+  const ta = document.getElementById("editTextNewValue"); if (ta) ta.value = (currentValue === null || currentValue === undefined) ? "" : String(currentValue);
+  document.getElementById("editTextUpdate").dataset.mode = "press";
+  b.style.display = "flex"; b.setAttribute("aria-hidden", "false"); setTimeout(() => ta && ta.focus(), 0);
+}
+function openEditNotesModal({ row, monthKey }) {
+  editNotesModalState = { row, monthKey };
+  const b = document.getElementById("editTextModalBackdrop"); if (!b) return;
+  document.getElementById("editTextSubtitle").textContent = `${row.company} • ${monthKey} • Notes`;
+  document.getElementById("editTextHint").textContent = "Edit notes (multi-line). Ctrl+Enter saves.";
+  const ta = document.getElementById("editTextNewValue"); if (ta) ta.value = row?.[NOTES_FIELD_KEY] ?? "";
+  document.getElementById("editTextUpdate").dataset.mode = "notes";
+  b.style.display = "flex"; b.setAttribute("aria-hidden", "false"); setTimeout(() => ta && ta.focus(), 0);
+}
+function closeEditTextModal() { const b = document.getElementById("editTextModalBackdrop"); if (!b) return; b.style.display = "none"; b.setAttribute("aria-hidden", "true"); editTextModalState = null; editNotesModalState = null; document.getElementById("editTextUpdate").dataset.mode = ""; }
+
+function wireEditModals(){
+  const emc=document.getElementById("editMetricClose"); if(emc) emc.addEventListener("click", closeEditMetricModal);
+  const emb=document.getElementById("editMetricModalBackdrop"); if(emb) emb.addEventListener("click",(e)=>{ if(e.target && e.target.id==="editMetricModalBackdrop") closeEditMetricModal(); });
+  const etc=document.getElementById("editTextClose"); if(etc) etc.addEventListener("click", closeEditTextModal);
+  const etb=document.getElementById("editTextModalBackdrop"); if(etb) etb.addEventListener("click",(e)=>{ if(e.target && e.target.id==="editTextModalBackdrop") closeEditTextModal(); });
+  const mi=document.getElementById("editMetricNewValue"); if(mi) mi.addEventListener("keydown",(e)=>{ if(e.key==="Enter"){ e.preventDefault(); document.getElementById("editMetricUpdate").click(); } });
+  const ti=document.getElementById("editTextNewValue"); if(ti) ti.addEventListener("keydown",(e)=>{ if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); document.getElementById("editTextUpdate").click(); } });
+  const mu=document.getElementById("editMetricUpdate"); if(mu) mu.addEventListener("click",async()=>{
+    if(!editModalState) return; const btn=mu; const raw=(document.getElementById("editMetricNewValue")||{}).value; if(raw===""||raw===null||raw===undefined) return alert("Enter a value."); const num=Number(raw); if(!Number.isFinite(num)) return alert("Please enter a valid number."); const { row, fieldKey } = editModalState; const rowId = getRowId(row); if(!rowId) return alert("Missing record id.");
+    try{ btn.disabled=true; btn.textContent="Saving..."; const body = buildPatchBodyForMetric(row, fieldKey, num); if(!body){ alert("Total is derived. Edit Images or Reels."); return; } await patchRowToBackend(rowId, body); closeEditMetricModal(); await reloadFromXanoAndRefresh(); }catch(err){ alert("Save failed: "+String(err?.message||err)); }finally{ btn.disabled=false; btn.textContent="Update"; }
+  });
+  const tu=document.getElementById("editTextUpdate"); if(tu) tu.addEventListener("click",async()=>{
+    const mode=tu.dataset.mode||""; const btn=tu; const val=(document.getElementById("editTextNewValue")||{}).value; const payloadVal=(val===""?null:val);
+    try{ btn.disabled=true; btn.textContent="Saving..."; if(mode==="press"){ const row=editTextModalState?.row; const rowId=getRowId(row); if(!rowId) return alert("Missing record id."); await patchRowToBackend(rowId, { monthly_press_coverage: payloadVal }); closeEditTextModal(); await reloadFromXanoAndRefresh(); return; } if(mode==="notes"){ const row=editNotesModalState?.row; const rowId=getRowId(row); if(!rowId) return alert("Missing record id."); await patchRowToBackend(rowId, { [NOTES_FIELD_KEY]: payloadVal }); closeEditTextModal(); await reloadFromXanoAndRefresh(); return; } }catch(err){ alert("Save failed: "+String(err?.message||err)); }finally{ btn.disabled=false; btn.textContent="Update"; }
+  });
+  window.addEventListener("keydown",(e)=>{ if(e.key!=="Escape") return; if(editModalState) closeEditMetricModal(); if(editTextModalState||editNotesModalState) closeEditTextModal(); });
 }
 
 // -------------------------
-// Init (defined before DOMContentLoaded listener)
+// Table/chart styling & helpers
+function formatUtcTimestamp(dt){ const yyyy=dt.getUTCFullYear(), mm=String(dt.getUTCMonth()+1).padStart(2,"0"), dd=String(dt.getUTCDate()).padStart(2,"0"); const hh=String(dt.getUTCHours()).padStart(2,"0"), mi=String(dt.getUTCMinutes()).padStart(2,"0"), ss=String(dt.getUTCSeconds()).padStart(2,"0"); return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss} UTC`; }
+function setLastUpdatedAtText(){ const el=document.getElementById("lastUpdatedAt"); if(!el) return; el.textContent = state.lastLoadedAtUtc ? `Last updated: ${formatUtcTimestamp(state.lastLoadedAtUtc)}` : ""; }
+function downloadDataUrl(filename,dataUrl){ const a=document.createElement("a"); a.href=dataUrl; a.download=filename; document.body.appendChild(a); a.click(); a.remove(); }
+function downloadChartAs(type){ const canvas=document.getElementById("metricChart"); if(!canvas) return alert("Chart not found."); const ext=type==="image/jpeg"?"jpg":"png"; const dataUrl=canvas.toDataURL(type,0.92); downloadDataUrl(`chart.${ext}`,dataUrl); }
+function downloadChartPdfViaPrint(){ const canvas=document.getElementById("metricChart"); if(!canvas) return alert("Chart not found."); const img=canvas.toDataURL("image/png"); const w=window.open("","_blank"); if(!w) return alert("Popup blocked"); w.document.open(); w.document.write(`<!doctype html><html><head><title>Chart</title><style>body{margin:0;padding:24px;font-family:system-ui,-apple-system,Segoe UI,Roboto;}img{max-width:100%;height:auto}.hint{margin-top:12px;opacity:0.7;font-size:12px}</style></head><body><img src="${img}" /><div class="hint">Use Print (Ctrl+P) and Save as PDF.</div></body></html>`); w.document.close(); w.focus(); }
+function wireChartDownloadButtons(){ const png=document.getElementById("downloadChartPng"), jpg=document.getElementById("downloadChartJpg"), pdf=document.getElementById("downloadChartPdf"); if(png) png.addEventListener("click",()=>downloadChartAs("image/png")); if(jpg) jpg.addEventListener("click",()=>downloadChartAs("image/jpeg")); if(pdf) pdf.addEventListener("click", downloadChartPdfViaPrint); }
+
+function applyMetricsTableStyling(){ const root=document.getElementById("metricsDisplay"); const table=root?.querySelector("table"); if(!table) return; root.querySelectorAll(".clickable-metric").forEach(n=>n.style.textDecoration="none"); table.querySelectorAll("td").forEach(td=>{ td.style.textAlign="center"; td.style.verticalAlign="middle"; }); table.querySelectorAll("tr").forEach(tr=>{ const tds=tr.querySelectorAll("td"); if(tds[0]) tds[0].style.textAlign="left"; if(tds[1]) tds[1].style.textAlign="left"; }); table.querySelectorAll("td").forEach(td=>{ if(td.querySelector(".metrics-rich")) td.style.textAlign="left"; }); }
+
 // -------------------------
+// Refresh / reload (canonical implementation)
+async function reloadFromXanoAndRefresh() {
+  try {
+    const rawRows = await fetchRowsFromBackend();
+    const raw = Array.isArray(rawRows) ? rawRows : (rawRows?.items || rawRows?.data || []);
+    state.rows = (Array.isArray(raw) ? raw : []).map(normalizeRow);
+    state.latestMonthKey = computeLatestMonthKey(state.rows);
+    const { min, max } = computeMinMaxMonthKey(state.rows);
+    state.minMonthKey = min; state.maxMonthKey = max;
+    state.lastLoadedAtUtc = new Date();
+    const companies = uniqueCompanies(state.rows);
+    if (state.selectedCompanies.size === 0) companies.forEach(c => state.selectedCompanies.add(c));
+    else for (const c of Array.from(state.selectedCompanies)) if (!companies.includes(c)) state.selectedCompanies.delete(c);
+    renderCompanyToggles(companies);
+    if (!state.visibleMonths.length) {
+      const defaultKey = state.latestMonthKey;
+      state.visibleMonths = defaultKey ? [defaultKey] : [];
+      state.rangeStartKey = defaultKey; state.rangeEndKey = defaultKey;
+    }
+    ensureChartMetricOptions(true);
+    refresh();
+    return;
+  } catch (err) {
+    console.error("reloadFromXanoAndRefresh error:", err);
+    throw err;
+  }
+}
+
+// Alias for any code calling either name
+window.reloadFromXanoAndRefresh = reloadFromXanoAndRefresh;
+window.reloadFromZapierAndRefresh = reloadFromXanoAndRefresh;
+
+// -------------------------
+// Helper: render company toggles
+function renderCompanyToggles(companies) {
+  const mount = document.getElementById("companyToggle");
+  if (!mount) return;
+  mount.innerHTML = "";
+  for (const name of companies) {
+    const id = `cmp_${name.replace(/\s+/g, "_")}`;
+    const checkbox = el("input", { type: "checkbox", id });
+    checkbox.checked = state.selectedCompanies.has(name);
+    checkbox.addEventListener("change", () => {
+      checkbox.checked ? state.selectedCompanies.add(name) : state.selectedCompanies.delete(name);
+      refresh();
+    });
+    mount.appendChild(el("div", { className: "toggle" }, [ checkbox, el("label", { for: id, text: name }) ]));
+  }
+}
+
+// -------------------------
+// Multi-month averaging
+function averageNumericForCompanyAcrossMonths(companyName, monthKeys, fieldKey) {
+  const vals = monthKeys.map(mk => findRowByCompanyAndMonth(companyName, mk)).map(r => {
+    if (!r) return null;
+    if (fieldKey === "number_of_monthly_instagram_posts") return extractPostsTotal(r.number_of_monthly_instagram_posts);
+    if (fieldKey === "monthly_instagram_engagement") return extractEngagementTotal(r.monthly_instagram_engagement);
+    return toNumberOrNull(r[fieldKey]);
+  }).filter(v => v !== null);
+  if (!vals.length) return null;
+  return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+}
+
+// -------------------------
+// Collect / dispatch (Xano)
+async function triggerCollectDispatch({ test = false } = {}) {
+  const mk = lastMonthKeyUtcYYYYMM() || currentMonthKeyUTC();
+  const parts = String(mk).split("-").map(s => s.trim());
+  let year = String(new Date().getUTCFullYear());
+  let month = String(new Date().getUTCMonth() + 1).padStart(2, "0");
+  if (parts.length === 2) { year = String(parts[0]); month = String(parts[1]).padStart(2, "0"); }
+  const payload = { year: Number(year), month: String(month).padStart(2, "0"), month_key: `${String(year)}-${String(month).padStart(2,"0")}`, test: !!test };
+  const res = await xanoFetch("/trigger_collect", { method: "POST", body: payload, withEditKey: true });
+  if (!res || !res.ok || !res.run_id) throw new Error(`Dispatch failed: ${JSON.stringify(res)}`);
+  return res.run_id;
+}
+async function pollRunAndRefresh(runId, { intervalMs = 5000, timeoutMs = 5 * 60 * 1000 } = {}) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const status = await xanoFetch(`/run_status/${encodeURIComponent(runId)}`, { method: "GET", withEditKey: true });
+      if (status && status.finished) {
+        if (status.success) { try { await reloadFromXanoAndRefresh(); } catch (e) { console.warn("Refresh after run failed:", e); } return { ok: true, status }; }
+        return { ok: false, status };
+      }
+    } catch (err) { console.warn("pollRunAndRefresh transient error:", err); }
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  return { ok: false, error: "timeout" };
+}
+
+// -------------------------
+// Legacy Zapier collect hook
+async function triggerZapierCollectAgencyFeeSwiisLastMonth() {
+  const hook = getZapierHook();
+  if (hook) {
+    const payload = { action: "collect_agency_fees", company: "SWIIS", month_key: lastMonthKeyUtcYYYYMM(), source_url: "https://www.swiisfostercare.com/fostering/fostering-allowance-pay/" };
+    const res = await fetch(hook, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    if (!res.ok) { const t = await res.text().catch(()=>""); throw new Error(`Zapier hook failed (${res.status}): ${t||res.statusText}`); }
+    return;
+  }
+  throw new Error("Missing ZAPIER_CATCH_HOOK_URL. Configure assets/config.js or set sessionStorage key 'ZAPIER_CATCH_HOOK_URL'.");
+}
+
+// -------------------------
+// Test dispatch
+async function sendTestPayloadToZapier() {
+  const btn = document.getElementById("testZapBtn");
+  const prevText = btn ? btn.textContent : null;
+  try {
+    if (btn) { btn.disabled = true; btn.textContent = "Sending test..."; }
+    const runId = await triggerCollectDispatch({ test: true });
+    alert("Test dispatch started. Run ID: " + runId + ". The scraper will run and post results to Xano.");
+    console.log("Test dispatch started, runId:", runId);
+  } catch (err) {
+    alert("Test failed: " + String(err?.message || err));
+    console.error(err);
+  } finally { if (btn) { btn.disabled = false; btn.textContent = prevText; } }
+}
+
+// -------------------------
+// Range select helpers
+function fillMonthSelect(selectEl){ selectEl.innerHTML=""; for(const m of MONTH_LABELS){ const opt=document.createElement("option"); opt.value=m.value; opt.textContent=m.name; selectEl.appendChild(opt);} }
+function fillYearSelect(selectEl, minYear, maxYear){ selectEl.innerHTML=""; for(let y=minYear;y<=maxYear;y++){ const opt=document.createElement("option"); opt.value=String(y); opt.textContent=String(y); selectEl.appendChild(opt);} }
+function setRangeSelectorsFromKeys(startKey, endKey){ const s=parseMonthKey(startKey), e=parseMonthKey(endKey); if(!s||!e) return; document.getElementById("startYear").value=String(s.year); document.getElementById("startMonth").value=s.month; document.getElementById("endYear").value=String(e.year); document.getElementById("endMonth").value=e.month; }
+
+// -------------------------
+// Refresh wrapper
+function refresh(){ const mount=document.getElementById("metricsDisplay"); if(!mount) return; mount.innerHTML=""; if(!state.latestMonthKey){ mount.appendChild(el("p",{className:"muted", text:"No data found in backend."})); destroyChart(); return; } const visibleMonths = state.visibleMonths.length ? state.visibleMonths : [state.latestMonthKey]; const selected = uniqueCompanies(state.rows).filter(c=>state.selectedCompanies.has(c)); document.getElementById("lastUpdated").textContent = `Loaded from backend. Latest month: ${state.latestMonthKey}. Viewing: ${visibleMonths.join(", ")}.`; setLastUpdatedAtText(); if(!selected.length){ mount.appendChild(el("p",{className:"muted", text:"No companies selected."})); destroyChart(); return; } mount.appendChild(buildMetricsTable(visibleMonths, selected)); ensureChartMetricOptions(false); renderChart(); applyMetricsTableStyling(); }
+
+// -------------------------
+// Modals & init wiring are already defined above, now define init and debug UI
+
 function setLockedUI(locked){ const lockScreen=document.getElementById("lockScreen"), appRoot=document.getElementById("appRoot"), lockBtn=document.getElementById("lockBtn"); if(locked){ lockScreen && lockScreen.classList.remove("hidden"); appRoot && appRoot.classList.add("hidden"); lockBtn && lockBtn.classList.add("hidden"); } else { lockScreen && lockScreen.classList.add("hidden"); appRoot && appRoot.classList.remove("hidden"); lockBtn && lockBtn.classList.remove("hidden"); } }
 
 async function attemptUnlock(password){ setEditKey(password); const ok = await verifyPassword(password); if(!ok) return false; await reloadFromXanoAndRefresh(); return true; }
 
+// -------------------------
+// Debug overlay (button + panel)
+function createDebugUI() {
+  if (document.getElementById("appDebugBtn")) return;
+  const style = document.createElement("style");
+  style.textContent = `
+#appDebugBtn { position: fixed; left: 12px; bottom: 12px; z-index: 99999; background:#111; color:#fff; border-radius:8px; padding:8px 10px; font-family:system-ui,-apple-system,Segoe UI,Roboto; cursor:pointer; opacity:0.95; border:none; }
+#appDebugPanel { position: fixed; left: 12px; bottom: 56px; width: 420px; max-height: 70vh; overflow:auto; z-index:99999; background:#fff; color:#111; border:1px solid #ddd; border-radius:8px; box-shadow:0 6px 30px rgba(0,0,0,0.12); padding:12px; display:none; font-family: system-ui,-apple-system,Segoe UI,Roboto; font-size:13px; }
+#appDebugPanel pre { white-space: pre-wrap; font-size:12px; line-height:1.25; margin:0; }
+#appDebugPanel h4 { margin:0 0 6px 0; font-size:14px; }
+#appDebugPanel button { margin-left:6px; }
+`;
+  document.head.appendChild(style);
+
+  const btn = document.createElement("button"); btn.id = "appDebugBtn"; btn.textContent = "Debug"; document.body.appendChild(btn);
+
+  const panel = document.createElement("div"); panel.id = "appDebugPanel";
+  panel.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><h4>App Debug</h4><div><button id="appDbgRun">Run Checks</button><button id="appDbgClose">Close</button></div></div><div id="appDbgOut"><pre>Ready. Click "Run Checks".</pre></div>`;
+  document.body.appendChild(panel);
+
+  btn.addEventListener("click", ()=>panel.style.display = panel.style.display === "none" ? "block" : "none");
+  document.getElementById("appDbgClose").addEventListener("click", ()=>panel.style.display = "none");
+
+  async function runChecks() {
+    const out = document.getElementById("appDbgOut");
+    out.innerHTML = "<pre>Running checks...\n</pre>";
+    const log = (s) => { out.innerHTML += s + "\n"; };
+    try {
+      const names = ["init","wireEditModals","fetchRowsFromBackend","patchRowToBackend","fetchEditKeyFromXano","verifyPassword","computeLatestMonthKey","computeMinMaxMonthKey","reloadFromXanoAndRefresh"];
+      for (const n of names) log(`${n}: ${(typeof window[n] === "function") ? "function" : typeof window[n]}`);
+      log("\nTrying fetchEditKeyFromXano (6s timeout)...");
+      if (typeof fetchEditKeyFromXano === "function") {
+        try { const val = await Promise.race([fetchEditKeyFromXano(), new Promise((_,r)=>setTimeout(()=>r(new Error("timeout")),6000))]); log("EDIT_KEY: " + JSON.stringify(val)); } catch (e) { log("EDIT_KEY error: " + String(e)); }
+      } else log("fetchEditKeyFromXano not present.");
+
+      log("\nTrying fetchRowsFromBackend (8s timeout)...");
+      if (typeof fetchRowsFromBackend === "function") {
+        try {
+          const rows = await Promise.race([fetchRowsFromBackend(), new Promise((_,r)=>setTimeout(()=>r(new Error("timeout")),8000))]);
+          log("Rows fetched: " + (Array.isArray(rows) ? rows.length : typeof rows));
+          if (Array.isArray(rows) && rows.length) log("Sample keys: " + Object.keys(rows[0]).slice(0,12).join(", "));
+          else log("Rows preview: " + JSON.stringify(rows).slice(0,400));
+        } catch (e) { log("Rows fetch error: " + String(e)); }
+      } else log("fetchRowsFromBackend not present.");
+      log("\nDone.");
+    } catch (err) {
+      out.innerHTML += "\nError running checks: " + String(err);
+    }
+  }
+  document.getElementById("appDbgRun").addEventListener("click", runChecks);
+}
+
+// create debug UI asap
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", createDebugUI); else setTimeout(createDebugUI, 0);
+
+// -------------------------
+// Init
 async function init(){
   try{
-    // wire modals / chart / downloads
-    if (typeof wireEditModals === "function") wireEditModals();
-    if (typeof ensureChartMetricOptions === "function") ensureChartMetricOptions(true);
-    if (typeof wireChartDownloadButtons === "function") wireChartDownloadButtons();
+    wireEditModals();
+    ensureChartMetricOptions(true);
+    wireChartDownloadButtons();
 
-    // chart select change
-    const chartSelect=document.getElementById("chartMetricSelect"); if(chartSelect) chartSelect.addEventListener("change", renderChart);
+    const chartSelect = document.getElementById("chartMetricSelect");
+    if (chartSelect) chartSelect.addEventListener("change", renderChart);
 
-    // Collect button
-    const collectBtn=document.getElementById("collectDataBtn");
-    if(collectBtn){
-      collectBtn.addEventListener("click", async ()=>{
+    const collectBtn = document.getElementById("collectDataBtn");
+    if (collectBtn) {
+      collectBtn.addEventListener("click", async () => {
         const prevText = collectBtn.textContent;
-        try{
-          collectBtn.disabled = true;
-          collectBtn.textContent = "Collecting...";
+        try {
+          collectBtn.disabled = true; collectBtn.textContent = "Collecting...";
           const runId = await triggerCollectDispatch();
           const pollResult = await pollRunAndRefresh(runId, { intervalMs: 5000, timeoutMs: 5 * 60 * 1000 });
           if (pollResult.ok) alert("Collect complete — dashboard updated.");
-          else { console.warn("Collect finished with error/timeout:", pollResult); alert("Collect finished with a problem (see console)."); }
-        }catch(err){ alert(String(err?.message || err)); } finally{ collectBtn.disabled=false; collectBtn.textContent=prevText; }
+          else { console.warn("Collect finished with issue:", pollResult); alert("Collect finished with a problem (see console)."); }
+        } catch (err) { alert(String(err?.message || err)); } finally { collectBtn.disabled = false; collectBtn.textContent = prevText; }
       });
     }
 
-    // Test button
-    const testBtn=document.getElementById("testZapBtn"); if(testBtn) testBtn.addEventListener("click", sendTestPayloadToZapier);
+    const testBtn = document.getElementById("testZapBtn"); if (testBtn) testBtn.addEventListener("click", sendTestPayloadToZapier);
+    const pwInput = document.getElementById("pagePassword"); if (pwInput) pwInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); const unlockBtn = document.getElementById("unlockBtn"); if (unlockBtn) unlockBtn.click(); } });
 
-    // Enter = Unlock
-    const pwInput=document.getElementById("pagePassword");
-    if(pwInput) pwInput.addEventListener("keydown",(e)=>{ if(e.key==="Enter"){ e.preventDefault(); const unlockBtn=document.getElementById("unlockBtn"); if(unlockBtn) unlockBtn.click(); } });
+    const applyRangeBtn = document.getElementById("applyRange"); if (applyRangeBtn) applyRangeBtn.addEventListener("click", applyCustomRangeFromSelectors);
+    const quickThis = document.getElementById("quickThisMonth"); if (quickThis) quickThis.addEventListener("change", (e) => { if (e.target.checked) setQuickThisMonth(); });
+    const quickLast = document.getElementById("quickLastMonth"); if (quickLast) quickLast.addEventListener("change", (e) => { if (e.target.checked) setQuickLastMonth(); });
 
-    // Range buttons
-    const applyRangeBtn=document.getElementById("applyRange"); if(applyRangeBtn) applyRangeBtn.addEventListener("click", applyCustomRangeFromSelectors);
-    const quickThis=document.getElementById("quickThisMonth"); if(quickThis) quickThis.addEventListener("change",(e)=>{ if(e.target.checked) setQuickThisMonth(); });
-    const quickLast=document.getElementById("quickLastMonth"); if(quickLast) quickLast.addEventListener("change",(e)=>{ if(e.target.checked) setQuickLastMonth(); });
-
-    // Lock/unlock
-    const lockBtn=document.getElementById("lockBtn"); if(lockBtn) lockBtn.addEventListener("click", ()=>{ clearEditKey(); setLockedUI(true); });
-    const unlockBtn=document.getElementById("unlockBtn");
-    if(unlockBtn){
-      unlockBtn.addEventListener("click", async ()=>{
-        const pw=(document.getElementById("pagePassword")||{}).value;
-        const errMount=document.getElementById("lockError");
-        if(errMount) errMount.textContent="";
-        try{
-          const ok = await attemptUnlock(pw);
-          if(!ok) throw new Error("Incorrect password.");
-          setLockedUI(false);
-          if(state.minMonthKey && state.maxMonthKey){
-            const minY=Number(state.minMonthKey.split("-")[0]);
-            const maxY=Number(state.maxMonthKey.split("-")[0]);
-            fillYearSelect(document.getElementById("startYear"), minY, maxY);
-            fillYearSelect(document.getElementById("endYear"), minY, maxY);
-            fillMonthSelect(document.getElementById("startMonth"));
-            fillMonthSelect(document.getElementById("endMonth"));
+    const lockBtn = document.getElementById("lockBtn"); if (lockBtn) lockBtn.addEventListener("click", () => { clearEditKey(); setLockedUI(true); });
+    const unlockBtn = document.getElementById("unlockBtn");
+    if (unlockBtn) {
+      unlockBtn.addEventListener("click", async () => {
+        const pw = (document.getElementById("pagePassword") || {}).value;
+        const errMount = document.getElementById("lockError");
+        if (errMount) errMount.textContent = "";
+        try { const ok = await attemptUnlock(pw); if (!ok) throw new Error("Incorrect password."); setLockedUI(false);
+          if (state.minMonthKey && state.maxMonthKey) {
+            const minY = Number(state.minMonthKey.split("-")[0]); const maxY = Number(state.maxMonthKey.split("-")[0]);
+            fillYearSelect(document.getElementById("startYear"), minY, maxY); fillYearSelect(document.getElementById("endYear"), minY, maxY);
+            fillMonthSelect(document.getElementById("startMonth")); fillMonthSelect(document.getElementById("endMonth"));
             setRangeSelectorsFromKeys(state.rangeStartKey, state.rangeEndKey);
           }
-        }catch(err){ clearEditKey(); if(errMount) errMount.textContent=`Unlock failed: ${String(err?.message||err)}`; }
+        } catch (err) { clearEditKey(); if (errMount) errMount.textContent = `Unlock failed: ${String(err?.message || err)}`; }
       });
     }
 
-    // Ensure locked UI to start
     setLockedUI(true);
-
-  }catch(e){
+  } catch (e) {
     console.error("init failed:", e);
-    const lockErr=document.getElementById("lockError");
-    if(lockErr) lockErr.textContent = String(e?.stack || e);
+    const lockErr = document.getElementById("lockError");
+    if (lockErr) lockErr.textContent = String(e?.stack || e);
     throw e;
   }
 }
 
-// Expose some helpers to console
+// Expose helpful functions for console debugging
 window.fetchRowsFromBackend = fetchRowsFromBackend;
 window.patchRowToBackend = patchRowToBackend;
 window.fetchEditKeyFromXano = fetchEditKeyFromXano;
 window.verifyPassword = verifyPassword;
-window.reloadFromZapierAndRefresh = reloadFromXanoAndRefresh;
 window.reloadFromXanoAndRefresh = reloadFromXanoAndRefresh;
+window.reloadFromZapierAndRefresh = reloadFromXanoAndRefresh;
 
-// Start app after DOM ready
+// Start after DOM ready
 window.addEventListener("DOMContentLoaded", () => {
-  // create debug UI
   try { createDebugUI(); } catch (e) { console.warn("createDebugUI failed:", e); }
-
-  // run init
-  init().catch(err => {
-    console.error("App init error:", err);
-    const lockErr = document.getElementById("lockError");
-    if (lockErr) lockErr.textContent = String(err?.stack || err);
-  });
+  init().catch(err => { console.error("App init error:", err); const lockErr = document.getElementById("lockError"); if (lockErr) lockErr.textContent = String(err?.stack || err); });
 });
