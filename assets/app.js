@@ -1,4 +1,3 @@
-// assets/app.js
 // Full replacement: Adds server-triggered Apply Range -> Zap -> callback polling flow,
 // plus the full original app logic. Overwrite your existing assets/app.js with this file
 // and hard-refresh the page after deploying.
@@ -145,12 +144,50 @@ async function xanoFetch(pathOrUrl, { method = "GET", body = null, withEditKey =
 }
 
 /* -------------------------
-   Backend adapters (Zapier primary, Xano fallback)
+   Backend adapters (Xano primary, Zapier fallback)
    ------------------------- */
 async function fetchRowsFromBackend() {
+  // Try Xano first (use session/app override if present)
+  const xanoUrl = getXanoTableGetUrl() || (XANO_BASE_URL + XANO_TABLE_PATH);
+  if (xanoUrl) {
+    try {
+      console.debug("fetchRowsFromBackend: trying Xano:", xanoUrl);
+      const res = await apiFetch(xanoUrl, { method: "GET" });
+      // Normalize common Xano shapes
+      if (Array.isArray(res)) {
+        console.debug("fetchRowsFromBackend: Xano returned array, count=", res.length);
+        return res;
+      }
+      if (res && Array.isArray(res.items)) {
+        console.debug("fetchRowsFromBackend: Xano returned .items, count=", res.items.length);
+        return res.items;
+      }
+      if (res && Array.isArray(res.data)) {
+        console.debug("fetchRowsFromBackend: Xano returned .data, count=", res.data.length);
+        return res.data;
+      }
+      if (res && typeof res === "object") {
+        for (const k of Object.keys(res)) {
+          if (Array.isArray(res[k])) {
+            console.debug("fetchRowsFromBackend: Xano returned array in property", k, "count=", res[k].length);
+            return res[k];
+          }
+        }
+      }
+      console.debug("fetchRowsFromBackend: Xano returned no recognizable array shape, returning []");
+      return [];
+    } catch (err) {
+      console.warn("fetchRowsFromBackend: Xano GET failed, will try Zapier fallback:", err);
+    }
+  } else {
+    console.warn("fetchRowsFromBackend: no Xano URL configured, will try Zapier fallback");
+  }
+
+  // Zapier fallback (use this only if Xano failed / not configured)
   const zapGet = getZapierTableGetUrl();
   if (zapGet) {
     try {
+      console.debug("fetchRowsFromBackend: trying Zapier:", zapGet);
       const rows = await apiFetch(zapGet, { method: "GET" });
       if (Array.isArray(rows)) return rows;
       if (rows && Array.isArray(rows.items)) return rows.items;
@@ -160,15 +197,12 @@ async function fetchRowsFromBackend() {
       }
       return [];
     } catch (e) {
-      console.warn("Zapier GET failed, falling back to Xano:", e);
+      console.warn("fetchRowsFromBackend: Zapier GET failed:", e);
     }
   }
-  const xurl = getXanoTableGetUrl() || (XANO_BASE_URL + XANO_TABLE_PATH);
-  const res = await apiFetch(xurl, { method: "GET" });
-  if (Array.isArray(res)) return res;
-  if (res && Array.isArray(res.items)) return res.items;
-  if (res && Array.isArray(res.data)) return res.data;
-  for (const k of Object.keys(res || {})) if (Array.isArray(res[k])) return res[k];
+
+  // Final fallback: no rows
+  console.debug("fetchRowsFromBackend: no backend returned rows, returning []");
   return [];
 }
 
