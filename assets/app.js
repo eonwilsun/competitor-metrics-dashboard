@@ -1,21 +1,28 @@
-// app.js - Full replacement (stable): Zapier primary backend, Xano fallback, Debug overlay.
-// Replace deployed assets/app.js with this file and hard-refresh (Ctrl/Cmd+Shift+R).
+// assets/app.js
+// Full replacement: Adds server-triggered Apply Range -> Zap -> callback polling flow,
+// plus the full original app logic. Overwrite your existing assets/app.js with this file
+// and hard-refresh the page after deploying.
 
-// -------------------------
-// Session / Edit Key helpers
+/* -------------------------
+   Session / Edit Key helpers
+   ------------------------- */
 const SESSION_KEY = "cmd.editKey.v1";
 function getEditKey() { try { return sessionStorage.getItem(SESSION_KEY) || ""; } catch (e) { return ""; } }
 function setEditKey(k) { try { sessionStorage.setItem(SESSION_KEY, String(k || "")); } catch (e) {} }
 function clearEditKey() { try { sessionStorage.removeItem(SESSION_KEY); } catch (e) {} }
 
-// -------------------------
-// Runtime config helpers (APP_CONFIG or sessionStorage)
+/* -------------------------
+   Runtime config helpers (APP_CONFIG or sessionStorage)
+   ------------------------- */
 function _getCfg(key) {
   try { if (typeof window !== "undefined" && window.APP_CONFIG && window.APP_CONFIG[key]) { const v = String(window.APP_CONFIG[key] || "").trim(); if (v) return v; } } catch (e) {}
   try { const s = sessionStorage.getItem(key); if (s && String(s).trim()) return String(s).trim(); } catch (e) {}
   return null;
 }
 
+/* -------------------------
+   Zapier / Xano config helpers
+   ------------------------- */
 // Default Zap URL (your webhook) - runtime overrides allowed
 const DEFAULT_ZAPIER_URL = "https://hooks.zapier.com/hooks/catch/2414815/u7tlcn7/";
 
@@ -33,15 +40,21 @@ function getXanoTableGetUrl() { return _getCfg("XANO_TABLE_GET_URL"); }
 function getXanoTablePatchUrl() { return _getCfg("XANO_TABLE_PATCH_URL"); }
 function getXanoConfigGetUrl() { return _getCfg("XANO_CONFIG_GET_URL"); }
 
-// -------------------------
-// Xano defaults (fallback)
+// Range trigger/result URL getters (server endpoints)
+function getRangeTriggerUrl() { return _getCfg("XANO_RANGE_TRIGGER_URL") || (XANO_BASE_URL + "/trigger/zap_range"); }
+function getRangeResultUrlBase() { return _getCfg("XANO_RANGE_RESULT_URL_BASE") || (XANO_BASE_URL + "/request_result"); }
+
+/* -------------------------
+   Xano defaults (fallback)
+   ------------------------- */
 const XANO_BASE_URL = "https://x8ki-letl-twmt.n7.xano.io/api:ZvixoXZ8";
 const XANO_TABLE_PATH = "/competitor_metrics_dashboard";
 const XANO_CONFIG_PATH = "/app_config";
 const EDIT_KEY_NAME = "EDIT_KEY";
 
-// -------------------------
-// UI / Metrics constants
+/* -------------------------
+   UI / Metrics constants
+   ------------------------- */
 const METRIC_FIELDS = [
   { key: "domain_authority", label: "Authority Score", format: "int" },
   { key: "number_of_referring_domains", label: "Referring Domains", format: "int" },
@@ -73,23 +86,26 @@ const CHART_METRICS = [
   { key: "monthly_instagram_engagement", label: "Engagements / month (Total)" }
 ];
 
-// -------------------------
-// Company ordering + colors
+/* -------------------------
+   Company ordering + colors
+   ------------------------- */
 function normalizeCompanyName(name) { return String(name || "").trim(); }
 function companySort(a, b) { const aa = normalizeCompanyName(a); const bb = normalizeCompanyName(b); const aIsSwiis = aa.toLowerCase() === "swiis"; const bIsSwiis = bb.toLowerCase() === "swiis"; if (aIsSwiis && !bIsSwiis) return -1; if (!aIsSwiis && bIsSwiis) return 1; return aa.localeCompare(bb); }
 const COMPANY_COLORS = { swiis:"#ef5d2f", capstone:"#0d66a2", compass:"#1897d3", fca:"#f27a30", nfa:"#f9ae42", "orange grove":"#51277d", orangegrove:"#51277d", tact:"#b22288" };
 function companyColor(company) { const key = normalizeCompanyName(company).toLowerCase(); if (COMPANY_COLORS[key]) return COMPANY_COLORS[key]; let hash = 0; for (let i=0;i<key.length;i++) hash=(hash*31+key.charCodeAt(i))>>>0; return `hsl(${hash%360},70%,45%)`; }
 
-// -------------------------
-// DOM + formatting helpers
+/* -------------------------
+   DOM + formatting helpers
+   ------------------------- */
 function el(tag, attrs = {}, children = []) { const node = document.createElement(tag); for (const [k,val] of Object.entries(attrs)) { if (k==="className") node.className = val; else if (k==="text") node.textContent = val; else if (k==="html") node.innerHTML = val; else node.setAttribute(k, val); } for (const c of children) node.appendChild(c); return node; }
 function toNumberOrNull(v){ if (v===null||v===undefined||v==="") return null; const n=Number(v); return Number.isNaN(n)?null:n; }
 function normalizeText(v){ if (v===null||v===undefined) return null; const s=String(v).trim(); return s.length ? s : null; }
 function escapeHtml(s){ return String(s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;"); }
 function linkifyTextToHtml(text){ if (text===null||text===undefined) return ""; const safe=escapeHtml(String(text)); const urlRegex=/(https?:\/\/[^\s]+)/g; return safe.replace(urlRegex,(url)=>`<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`).replaceAll("\n","<br>"); }
 
-// -------------------------
-// API fetch wrapper
+/* -------------------------
+   API fetch wrapper
+   ------------------------- */
 async function apiFetch(url, { method="GET", body=null, headers={}, expectJson=true } = {}) {
   const opts = { method, headers: { ...(headers||{}) } };
   if (body !== null && body !== undefined) { opts.body = typeof body === "string" ? body : JSON.stringify(body); if (!opts.headers["Content-Type"]) opts.headers["Content-Type"] = "application/json"; }
@@ -99,8 +115,9 @@ async function apiFetch(url, { method="GET", body=null, headers={}, expectJson=t
   return await res.json();
 }
 
-// -------------------------
-// Xano fetch (for config/dispatch)
+/* -------------------------
+   Xano fetch (for config/dispatch)
+   ------------------------- */
 async function xanoFetch(pathOrUrl, { method = "GET", body = null, withEditKey = true } = {}) {
   const candidate = String(pathOrUrl || "");
   let full;
@@ -127,8 +144,9 @@ async function xanoFetch(pathOrUrl, { method = "GET", body = null, withEditKey =
   return await res.json();
 }
 
-// -------------------------
-// Backend adapters (Zapier primary, Xano fallback)
+/* -------------------------
+   Backend adapters (Zapier primary, Xano fallback)
+   ------------------------- */
 async function fetchRowsFromBackend() {
   const zapGet = getZapierTableGetUrl();
   if (zapGet) {
@@ -171,8 +189,9 @@ async function patchRowToBackend(rowId, fields) {
   return updated;
 }
 
-// -------------------------
-// fetch edit key (Xano primary, Zapier fallback)
+/* -------------------------
+   fetch edit key (Xano primary, Zapier fallback)
+   ------------------------- */
 async function fetchEditKeyFromXano() {
   try {
     const cfgUrl = getXanoConfigGetUrl() || (XANO_BASE_URL + XANO_CONFIG_PATH);
@@ -221,8 +240,9 @@ async function verifyPassword(pw) {
   return entered === actual;
 }
 
-// -------------------------
-// State & normalization
+/* -------------------------
+   State & normalization
+   ------------------------- */
 const state = { visibleMonths: [], rangeStartKey: null, rangeEndKey: null, minMonthKey: null, maxMonthKey: null, selectedCompanies: new Set(), rows: [], latestMonthKey: null, lastLoadedAtUtc: null };
 
 function getObj(root){ return root && typeof root === "object" ? root : {}; }
@@ -233,12 +253,14 @@ function readEngagementRate(row){ return toNumberOrNull(getObj(row?.monthly_inst
 function normalizeRow(row) { const r = { ...row }; const feeObj = r.agency_fee_one_child; if (feeObj && typeof feeObj === "object") { r.agency_fee_one_child_weekly = toNumberOrNull(feeObj.Weekly ?? feeObj.weekly); r.agency_fee_one_child_yearly = toNumberOrNull(feeObj.Yearly ?? feeObj.yearly); } r.posts_images = readPostsImages(r) ?? 0; r.posts_reels = readPostsReels(r) ?? 0; r.posts_total = (toNumberOrNull(r.posts_images) || 0) + (toNumberOrNull(r.posts_reels) || 0); r.engagement_total = readEngagementTotal(r); r.engagement_rate_percentage = readEngagementRate(r); r.monthly_press_coverage = normalizeText(r.monthly_press_coverage); return r; }
 function getRowId(row) { const id = row?.id ?? row?.competitor_metrics_dashboard_id; return (id===null||id===undefined||id==="")?null:id; }
 
-// -------------------------
-// Patch builder
+/* -------------------------
+   Patch builder
+   ------------------------- */
 function buildPatchBodyForMetric(row, fieldKey, rawNum) { const num = Number(rawNum); if (fieldKey === "agency_fee_one_child_weekly" || fieldKey === "agency_fee_one_child_yearly") { const rootKey = "agency_fee_one_child"; const childKey = fieldKey==="agency_fee_one_child_weekly" ? "Weekly" : "Yearly"; const current = (row && typeof row[rootKey]==="object"&&row[rootKey])?row[rootKey]:{}; return { [rootKey]: { ...current, [childKey]: Math.round(num) } }; } if (fieldKey === "posts_images" || fieldKey === "posts_reels") { const rootKey = "number_of_monthly_instagram_posts"; const current=(row&&typeof row[rootKey]==="object"&&row[rootKey])?row[rootKey]:{}; const next={...current}; if(fieldKey==="posts_images") next.image_graphic=Math.round(num); if(fieldKey==="posts_reels") next.reels_video=Math.round(num); next.number_of_monthly_instagram_posts_total=(toNumberOrNull(next.image_graphic)||0)+(toNumberOrNull(next.reels_video)||0); return { [rootKey]: next }; } if (fieldKey==="posts_total") return null; if (fieldKey==="engagement_total"||fieldKey==="engagement_rate_percentage"){ const rootKey="monthly_instagram_engagement"; const current=(row&&typeof row[rootKey]==="object"&&row[rootKey])?row[rootKey]:{}; const next={...current}; if(fieldKey==="engagement_total") next.total_engagement=Math.round(num); if(fieldKey==="engagement_rate_percentage") next.engagement_rate_percentage=num; return { [rootKey]: next }; } return { [fieldKey]: Math.round(num) }; }
 
-// -------------------------
-// Month helpers & compute helpers
+/* -------------------------
+   Month helpers & compute helpers
+   ------------------------- */
 const MONTHS = { january:"01", february:"02", march:"03", april:"04", may:"05", june:"06", july:"07", august:"08", september:"09", october:"10", november:"11", december:"12" };
 const MONTH_LABELS = [ {name:"January",value:"01"},{name:"February",value:"02"},{name:"March",value:"03"},{name:"April",value:"04"},{name:"May",value:"05"},{name:"June",value:"06"},{name:"July",value:"07"},{name:"August",value:"08"},{name:"September",value:"09"},{name:"October",value:"10"},{name:"November",value:"11"},{name:"December",value:"12"} ];
 
@@ -266,9 +288,60 @@ function computeMinMaxMonthKey(rows) {
   return { min: keys[0] || null, max: keys[keys.length - 1] || null };
 }
 
-// -------------------------
-// applyCustomRangeFromSelectors + alias (permanent)
-function applyCustomRangeFromSelectors() {
+/* -------------------------
+   NEW: Range request -> trigger & poll helpers
+   ------------------------- */
+/**
+ * requestRangeFromServer(payload)
+ * - payload: { request_id, start_year, start_month, end_year, end_month, company? }
+ * - POSTs to Xano trigger endpoint and returns parsed JSON (expecting request_id)
+ */
+async function requestRangeFromServer(payload) {
+  const url = sessionStorage.getItem('XANO_RANGE_TRIGGER_URL') || getRangeTriggerUrl();
+  if (!url) throw new Error('No XANO range trigger URL configured. Set sessionStorage XANO_RANGE_TRIGGER_URL or configure APP_CONFIG.');
+  const headers = { 'Content-Type': 'application/json' };
+  const k = getEditKey();
+  if (k) headers['x-edit-key'] = k;
+  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload) });
+  if (!res.ok) {
+    const t = await res.text().catch(()=>res.statusText);
+    throw new Error(`Range trigger failed: ${res.status} ${t}`);
+  }
+  return await res.json().catch(()=> ({ request_id: payload.request_id, status: 'pending' }));
+}
+
+/**
+ * pollRangeResults(requestId, attempts = 30, delayMs = 1000)
+ * - GETs range result URL until { status: 'ready', rows: [...] } or timeout
+ */
+async function pollRangeResults(requestId, attempts = 30, delayMs = 1000) {
+  const base = sessionStorage.getItem('XANO_RANGE_RESULT_URL_BASE') || getRangeResultUrlBase();
+  if (!base) throw new Error('No XANO range result URL configured. Set sessionStorage XANO_RANGE_RESULT_URL_BASE or configure APP_CONFIG.');
+  const key = getEditKey();
+  const url = base + (base.includes('?') ? '&' : '?') + 'request_id=' + encodeURIComponent(requestId);
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const headers = { 'Accept': 'application/json' };
+      if (key) headers['x-edit-key'] = key;
+      const res = await fetch(url, { method: 'GET', headers, cache: 'no-store' });
+      if (res.status === 200) {
+        const json = await res.json().catch(()=>null);
+        if (json && json.status === 'ready') return json.rows || [];
+      }
+      // treat 202/404 as pending; other statuses logged and retried
+    } catch (err) {
+      console.warn('pollRangeResults transient error', err);
+    }
+    await new Promise(r => setTimeout(r, delayMs));
+  }
+  throw new Error('Timed out waiting for range results from server.');
+}
+
+/* -------------------------
+   applyCustomRangeFromSelectors + alias (server-backed)
+   Now triggers server -> Zap -> callback and waits for results.
+   ------------------------- */
+async function applyCustomRangeFromSelectors() {
   const startKey = monthKeyFromYYYYMMParts(
     (document.getElementById("startYear") || {}).value,
     (document.getElementById("startMonth") || {}).value
@@ -286,16 +359,57 @@ function applyCustomRangeFromSelectors() {
   if (quickThis) quickThis.checked = false;
   if (quickLast) quickLast.checked = false;
 
+  // Update UI state immediately
   state.rangeStartKey = startKey;
   state.rangeEndKey = endKey;
   state.visibleMonths = listMonthKeysBetween(startKey, endKey);
 
-  refresh();
+  const applyBtn = document.getElementById("applyRange");
+  const prevText = applyBtn ? applyBtn.textContent : null;
+
+  try {
+    if (applyBtn) { applyBtn.disabled = true; applyBtn.textContent = "Working..."; }
+
+    const requestId = `req-${Date.now()}-${Math.floor(Math.random()*10000)}`;
+    const s = parseMonthKey(startKey), e = parseMonthKey(endKey);
+    const payload = {
+      request_id: requestId,
+      start_year: s.year,
+      start_month: String(s.month).padStart(2,"0"),
+      end_year: e.year,
+      end_month: String(e.month).padStart(2,"0")
+    };
+
+    const companyInput = document.getElementById("companyFilter") || document.getElementById("company-filter");
+    if (companyInput && companyInput.value) payload.company = companyInput.value;
+
+    // Trigger server which will forward to Zap
+    await requestRangeFromServer(payload);
+
+    // Poll server for results (Zap will POST them back to server)
+    const rows = await pollRangeResults(requestId, 60, 1000); // up to ~60s
+    state.rows = (Array.isArray(rows) ? rows : []).map(normalizeRow);
+    state.latestMonthKey = computeLatestMonthKey(state.rows);
+    const { min, max } = computeMinMaxMonthKey(state.rows);
+    state.minMonthKey = min; state.maxMonthKey = max;
+    const companies = uniqueCompanies(state.rows);
+    if (state.selectedCompanies.size === 0) companies.forEach(c => state.selectedCompanies.add(c));
+    else for (const c of Array.from(state.selectedCompanies)) if (!companies.includes(c)) state.selectedCompanies.delete(c);
+    state.lastLoadedAtUtc = new Date();
+    ensureChartMetricOptions(true);
+    refresh();
+  } catch (err) {
+    console.error("applyCustomRangeFromSelectors error:", err);
+    alert("Failed to load range results: " + (err?.message || err));
+  } finally {
+    if (applyBtn) { applyBtn.disabled = false; applyBtn.textContent = prevText || "Apply Range"; }
+  }
 }
 function applyCustomRangeFromSelectors_v2() { return applyCustomRangeFromSelectors(); }
 
-// -------------------------
-// setLockedUI - must exist before init runs
+/* -------------------------
+   setLockedUI - must exist before init runs
+   ------------------------- */
 function setLockedUI(locked){
   const lockScreen = document.getElementById("lockScreen");
   const appRoot = document.getElementById("appRoot");
@@ -311,9 +425,9 @@ function setLockedUI(locked){
   }
 }
 
-// -------------------------
-// Chart / render / UI functions (complete)
-// Note: these implementations match your app behavior.
+/* -------------------------
+   Chart / render / UI functions (complete)
+   ------------------------- */
 let metricChart = null;
 let editModalState = null, editTextModalState = null, editNotesModalState = null;
 
@@ -485,8 +599,9 @@ function wireEditModals(){
   window.addEventListener("keydown",(e)=>{ if(e.key!=="Escape") return; if(editModalState) closeEditMetricModal(); if(editTextModalState||editNotesModalState) closeEditTextModal(); });
 }
 
-// -------------------------
-// Table/chart styling & helpers
+/* -------------------------
+   Table/chart styling & helpers
+   ------------------------- */
 function formatUtcTimestamp(dt){ const yyyy=dt.getUTCFullYear(), mm=String(dt.getUTCMonth()+1).padStart(2,"0"), dd=String(dt.getUTCDate()).padStart(2,"0"); const hh=String(dt.getUTCHours()).padStart(2,"0"), mi=String(dt.getUTCMinutes()).padStart(2,"0"), ss=String(dt.getUTCSeconds()).padStart(2,"0"); return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss} UTC`; }
 function setLastUpdatedAtText(){ const el=document.getElementById("lastUpdatedAt"); if(!el) return; el.textContent = state.lastLoadedAtUtc ? `Last updated: ${formatUtcTimestamp(state.lastLoadedAtUtc)}` : ""; }
 function downloadDataUrl(filename,dataUrl){ const a=document.createElement("a"); a.href=dataUrl; a.download=filename; document.body.appendChild(a); a.click(); a.remove(); }
@@ -496,13 +611,15 @@ function wireChartDownloadButtons(){ const png=document.getElementById("download
 
 function applyMetricsTableStyling(){ const root=document.getElementById("metricsDisplay"); const table=root?.querySelector("table"); if(!table) return; root.querySelectorAll(".clickable-metric").forEach(n=>n.style.textDecoration="none"); table.querySelectorAll("td").forEach(td=>{ td.style.textAlign="center"; td.style.verticalAlign="middle"; }); table.querySelectorAll("tr").forEach(tr=>{ const tds=tr.querySelectorAll("td"); if(tds[0]) tds[0].style.textAlign="left"; if(tds[1]) tds[1].style.textAlign="left"; }); table.querySelectorAll("td").forEach(td=>{ if(td.querySelector(".metrics-rich")) td.style.textAlign="left"; }); }
 
-// -------------------------
-// Helper utilities used in multiple places
+/* -------------------------
+   Helper utilities used in multiple places
+   ------------------------- */
 function uniqueCompanies(rows){ const set=new Set(rows.map(r=>normalizeCompanyName(r.company)).filter(Boolean)); return Array.from(set).sort(companySort); }
 function findRowByCompanyAndMonth(companyName, monthKey){ return state.rows.find(r=>String(r.company)===String(companyName) && monthKeyFromYearMonthName(r.year, r.month)===monthKey); }
 
-// -------------------------
-// Refresh / reload (canonical implementation)
+/* -------------------------
+   Refresh / reload (canonical implementation)
+   ------------------------- */
 async function reloadFromXanoAndRefresh() {
   try {
     const rawRows = await fetchRowsFromBackend();
@@ -534,8 +651,9 @@ async function reloadFromXanoAndRefresh() {
 window.reloadFromXanoAndRefresh = reloadFromXanoAndRefresh;
 window.reloadFromZapierAndRefresh = reloadFromXanoAndRefresh;
 
-// -------------------------
-// Helper: render company toggles
+/* -------------------------
+   Helper: render company toggles
+   ------------------------- */
 function renderCompanyToggles(companies) {
   const mount = document.getElementById("companyToggle");
   if (!mount) return;
@@ -552,8 +670,9 @@ function renderCompanyToggles(companies) {
   }
 }
 
-// -------------------------
-// Multi-month averaging
+/* -------------------------
+   Multi-month averaging
+   ------------------------- */
 function averageNumericForCompanyAcrossMonths(companyName, monthKeys, fieldKey) {
   const vals = monthKeys.map(mk => findRowByCompanyAndMonth(companyName, mk)).map(r => {
     if (!r) return null;
@@ -565,8 +684,9 @@ function averageNumericForCompanyAcrossMonths(companyName, monthKeys, fieldKey) 
   return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
 }
 
-// -------------------------
-// Collect / dispatch (Xano)
+/* -------------------------
+   Collect / dispatch (Xano)
+   ------------------------- */
 async function triggerCollectDispatch({ test = false } = {}) {
   const mk = lastMonthKeyUtcYYYYMM() || currentMonthKeyUTC();
   const parts = String(mk).split("-").map(s => s.trim());
@@ -593,8 +713,9 @@ async function pollRunAndRefresh(runId, { intervalMs = 5000, timeoutMs = 5 * 60 
   return { ok: false, error: "timeout" };
 }
 
-// -------------------------
-// Legacy Zapier collect hook
+/* -------------------------
+   Legacy Zapier collect hook
+   ------------------------- */
 async function triggerZapierCollectAgencyFeeSwiisLastMonth() {
   const hook = getZapierHook();
   if (hook) {
@@ -606,8 +727,9 @@ async function triggerZapierCollectAgencyFeeSwiisLastMonth() {
   throw new Error("Missing ZAPIER_CATCH_HOOK_URL. Configure assets/config.js or set sessionStorage key 'ZAPIER_CATCH_HOOK_URL'.");
 }
 
-// -------------------------
-// Test dispatch
+/* -------------------------
+   Test dispatch
+   ------------------------- */
 async function sendTestPayloadToZapier() {
   const btn = document.getElementById("testZapBtn");
   const prevText = btn ? btn.textContent : null;
@@ -622,8 +744,9 @@ async function sendTestPayloadToZapier() {
   } finally { if (btn) { btn.disabled = false; btn.textContent = prevText; } }
 }
 
-// -------------------------
-// Quick range helpers
+/* -------------------------
+   Quick range helpers
+   ------------------------- */
 function setQuickThisMonth(){
   const key = currentMonthKeyUTC();
   state.rangeStartKey = key; state.rangeEndKey = key; state.visibleMonths = [key];
@@ -635,18 +758,21 @@ function setQuickLastMonth(){
   refresh();
 }
 
-// -------------------------
-// Range select helpers
+/* -------------------------
+   Range select helpers
+   ------------------------- */
 function fillMonthSelect(selectEl){ if(!selectEl) return; selectEl.innerHTML=""; for(const m of MONTH_LABELS){ const opt=document.createElement("option"); opt.value=m.value; opt.textContent=m.name; selectEl.appendChild(opt);} }
 function fillYearSelect(selectEl, minYear, maxYear){ if(!selectEl) return; selectEl.innerHTML=""; for(let y=minYear;y<=maxYear;y++){ const opt=document.createElement("option"); opt.value=String(y); opt.textContent=String(y); selectEl.appendChild(opt);} }
 function setRangeSelectorsFromKeys(startKey, endKey){ const s=parseMonthKey(startKey), e=parseMonthKey(endKey); if(!s||!e) return; const sy=document.getElementById("startYear"), sm=document.getElementById("startMonth"), ey=document.getElementById("endYear"), em=document.getElementById("endMonth"); if(sy) sy.value=String(s.year); if(sm) sm.value=s.month; if(ey) ey.value=String(e.year); if(em) em.value=e.month; }
 
-// -------------------------
-// Refresh wrapper
+/* -------------------------
+   Refresh wrapper
+   ------------------------- */
 function refresh(){ const mount=document.getElementById("metricsDisplay"); if(!mount) return; mount.innerHTML=""; if(!state.latestMonthKey){ mount.appendChild(el("p",{className:"muted", text:"No data found in backend."})); destroyChart(); return; } const visibleMonths = state.visibleMonths.length ? state.visibleMonths : [state.latestMonthKey]; const selected = uniqueCompanies(state.rows).filter(c=>state.selectedCompanies.has(c)); const lastUpdatedEl=document.getElementById("lastUpdated"); if(lastUpdatedEl) lastUpdatedEl.textContent = `Loaded from backend. Latest month: ${state.latestMonthKey}. Viewing: ${visibleMonths.join(", ")}.`; setLastUpdatedAtText(); if(!selected.length){ mount.appendChild(el("p",{className:"muted", text:"No companies selected."})); destroyChart(); return; } mount.appendChild(buildMetricsTable(visibleMonths, selected)); ensureChartMetricOptions(false); renderChart(); applyMetricsTableStyling(); }
 
-// -------------------------
-// Debug overlay (button + panel)
+/* -------------------------
+   Debug overlay (button + panel)
+   ------------------------- */
 function createDebugUI() {
   if (document.getElementById("appDebugBtn")) return;
   const style = document.createElement("style");
@@ -700,8 +826,9 @@ function createDebugUI() {
 // create debug UI asap
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", createDebugUI); else setTimeout(createDebugUI, 0);
 
-// -------------------------
-// Init
+/* -------------------------
+   Init
+   ------------------------- */
 async function attemptUnlock(password){ setEditKey(password); const ok = await verifyPassword(password); if(!ok) return false; await reloadFromXanoAndRefresh(); return true; }
 
 async function init(){
@@ -761,7 +888,9 @@ async function init(){
   }
 }
 
-// Expose helpful functions for console debugging
+/* -------------------------
+   Exports & boot
+   ------------------------- */
 window.fetchRowsFromBackend = fetchRowsFromBackend;
 window.patchRowToBackend = patchRowToBackend;
 window.fetchEditKeyFromXano = fetchEditKeyFromXano;
@@ -769,7 +898,6 @@ window.verifyPassword = verifyPassword;
 window.reloadFromXanoAndRefresh = reloadFromXanoAndRefresh;
 window.reloadFromZapierAndRefresh = reloadFromXanoAndRefresh;
 
-// Start after DOM ready
 window.addEventListener("DOMContentLoaded", () => {
   try { createDebugUI(); } catch (e) { console.warn("createDebugUI failed:", e); }
   init().catch(err => { console.error("App init error:", err); const lockErr = document.getElementById("lockError"); if (lockErr) lockErr.textContent = String(err?.stack || err); });
