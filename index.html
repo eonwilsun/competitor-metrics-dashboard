@@ -47,43 +47,6 @@
       opacity: 0.85;
     }
 
-    /* Collect data UI */
-    .collect-row {
-      margin: 10px 0 12px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      align-items: center;
-    }
-
-    /* ORANGE button with black text + black border */
-    .collect-row button {
-      padding: 8px 12px;
-      border: 1px solid #000000;
-      border-radius: 10px;
-      background: #ef5d2f;
-      color: #000000;
-      font-weight: 800;
-      cursor: pointer;
-    }
-    .collect-row button:hover { filter: brightness(0.95); }
-    .collect-row .desc {
-      color: #666;
-      font-size: 13px;
-    }
-
-    /* Test button style */
-    #testZapBtn {
-      background: #0ea5a4;
-      color: #fff;
-      border: 1px solid #065f5b;
-      padding: 8px 12px;
-      border-radius: 10px;
-      font-weight: 700;
-      cursor: pointer;
-    }
-    #testZapBtn:hover { filter: brightness(0.95); }
-
     /* Time-range UI */
     .range-grid {
       display: grid;
@@ -338,14 +301,10 @@
       <section class="card">
         <h2>Metrics</h2>
         <p class="muted" style="margin-top:-6px;">
-          Click a number to edit it. Changes save to Zapier Table.
+          Click a number to edit it. Changes save to Xano.
         </p>
 
-        <div class="collect-row">
-          <button id="collectDataBtn" type="button">Collect data</button>
-          <button id="testZapBtn" type="button">Send test to Zap</button>
-          <span class="desc">Click to collect last month’s data. Use the test button to send a sample payload to Zapier.</span>
-        </div>
+        <!-- Removed Collect/Test UI per request -->
 
         <div id="metricsDisplay" class="table-wrap"></div>
 
