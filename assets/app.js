@@ -1,5 +1,6 @@
-// Full replacement: Use Xano API data only and remove Collect/Test Zap UI & helpers.
-// Overwrite your existing assets/app.js with this file and hard-refresh the page after deploying.
+// Full replacement: Xano-backed competitor metrics dashboard
+// - Loads all rows from Xano once
+// - Date range is applied entirely on the frontend (no Xano range trigger)
 
 /* -------------------------
    Session / Edit Key helpers
@@ -45,14 +46,6 @@ function getZapierHook() { return _getCfg("ZAPIER_CATCH_HOOK_URL"); }
 function getXanoTableGetUrl() { return _getCfg("XANO_TABLE_GET_URL"); }
 function getXanoTablePatchUrl() { return _getCfg("XANO_TABLE_PATCH_URL"); }
 function getXanoConfigGetUrl() { return _getCfg("XANO_CONFIG_GET_URL"); }
-
-// Range trigger/result URL getters (server endpoints)
-function getRangeTriggerUrl() {
-  return _getCfg("XANO_RANGE_TRIGGER_URL") || (XANO_BASE_URL + "/trigger/zap_range");
-}
-function getRangeResultUrlBase() {
-  return _getCfg("XANO_RANGE_RESULT_URL_BASE") || (XANO_BASE_URL + "/request_result");
-}
 
 /* -------------------------
    Xano defaults (fallback)
@@ -183,38 +176,6 @@ async function apiFetch(url, { method = "GET", body = null, headers = {}, expect
     throw new Error(`API error ${res.status}: ${text || res.statusText}`);
   }
   if (!expectJson) return res;
-  return await res.json();
-}
-
-/* -------------------------
-   Xano fetch (for config/dispatch)
-   ------------------------- */
-async function xanoFetch(pathOrUrl, { method = "GET", body = null, withEditKey = true } = {}) {
-  const candidate = String(pathOrUrl || "");
-  let full;
-  if (/^https?:\/\//i.test(candidate)) {
-    full = candidate;
-  } else {
-    const getUrl = getXanoTableGetUrl();
-    if (getUrl) {
-      const base = getUrl.replace(/\/competitor_metrics_dashboard(\/.*)?$/i, "");
-      full = base + candidate;
-    } else {
-      full = XANO_BASE_URL + candidate;
-    }
-  }
-  const headers = { "Content-Type": "application/json" };
-  if (withEditKey) {
-    const key = getEditKey();
-    if (key) headers["x-edit-key"] = String(key);
-  }
-  const opts = { method, headers };
-  if (body !== null && body !== undefined) opts.body = JSON.stringify(body);
-  const res = await fetch(full, opts);
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Xano error ${res.status}: ${text || res.statusText}`);
-  }
   return await res.json();
 }
 
@@ -467,105 +428,42 @@ function computeMinMaxMonthKey(rows) {
 }
 
 /* -------------------------
-   Range trigger/poll helpers (server-backed)
+   Date range (frontend-only)
    ------------------------- */
-async function requestRangeFromServer(payload) {
-  const url = sessionStorage.getItem("XANO_RANGE_TRIGGER_URL") || getRangeTriggerUrl();
-  if (!url) throw new Error("No XANO range trigger URL configured.");
-  const headers = { "Content-Type": "application/json" };
-  const k = getEditKey();
-  if (k) headers["x-edit-key"] = k;
-  const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(payload) });
-  if (!res.ok) {
-    const t = await res.text().catch(() => res.statusText);
-    throw new Error(`Range trigger failed: ${res.status} ${t}`);
-  }
-  return await res.json().catch(() => ({ request_id: payload.request_id, status: "pending" }));
-}
-
-async function pollRangeResults(requestId, attempts = 30, delayMs = 1000) {
-  const base = sessionStorage.getItem("XANO_RANGE_RESULT_URL_BASE") || getRangeResultUrlBase();
-  if (!base) throw new Error("No XANO range result URL configured.");
-  const key = getEditKey();
-  const url = base + (base.includes("?") ? "&" : "?") + "request_id=" + encodeURIComponent(requestId);
-  for (let i = 0; i < attempts; i++) {
-    try {
-      const headers = { Accept: "application/json" };
-      if (key) headers["x-edit-key"] = key;
-      const res = await fetch(url, { method: "GET", headers, cache: "no-store" });
-      if (res.status === 200) {
-        const json = await res.json().catch(() => null);
-        if (json && json.status === "ready") return json.rows || [];
-      }
-    } catch (err) {
-      console.warn("pollRangeResults transient error", err);
-    }
-    await new Promise(r => setTimeout(r, delayMs));
-  }
-  throw new Error("Timed out waiting for range results from server.");
-}
-
 async function applyCustomRangeFromSelectors() {
-  const startKey = monthKeyFromYYYYMMParts(
-    (document.getElementById("startYear") || {}).value,
-    (document.getElementById("startMonth") || {}).value
-  );
-  const endKey = monthKeyFromYYYYMMParts(
-    (document.getElementById("endYear") || {}).value,
-    (document.getElementById("endMonth") || {}).value
-  );
+  const startYear = (document.getElementById("startYear") || {}).value;
+  const startMonth = (document.getElementById("startMonth") || {}).value;
+  const endYear = (document.getElementById("endYear") || {}).value;
+  const endMonth = (document.getElementById("endMonth") || {}).value;
 
-  if (!startKey || !endKey) return alert("Please select start and end month/year.");
-  if (compareMonthKey(startKey, endKey) > 0) return alert("Start month must be before (or the same as) End month.");
+  if (!startYear || !startMonth || !endYear || !endMonth) {
+    alert("Please select start and end month/year.");
+    return;
+  }
+
+  const startKey = monthKeyFromYYYYMMParts(startYear, startMonth);
+  const endKey = monthKeyFromYYYYMMParts(endYear, endMonth);
+
+  if (compareMonthKey(startKey, endKey) > 0) {
+    alert("Start month must be before (or the same as) End month.");
+    return;
+  }
 
   state.rangeStartKey = startKey;
   state.rangeEndKey = endKey;
   state.visibleMonths = listMonthKeysBetween(startKey, endKey);
 
-  const applyBtn = document.getElementById("applyRange");
-  const prevText = applyBtn ? applyBtn.textContent : null;
-
-  try {
-    if (applyBtn) { applyBtn.disabled = true; applyBtn.textContent = "Working..."; }
-
-    const requestId = `req-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-    const s = parseMonthKey(startKey), e = parseMonthKey(endKey);
-    const payload = {
-      request_id: requestId,
-      start_year: s.year,
-      start_month: String(s.month).padStart(2, "0"),
-      end_year: e.year,
-      end_month: String(e.month).padStart(2, "0")
-    };
-    const companyInput = document.getElementById("companyFilter") || document.getElementById("company-filter");
-    if (companyInput && companyInput.value) payload.company = companyInput.value;
-
-    await requestRangeFromServer(payload);
-    const rows = await pollRangeResults(requestId, 60, 1000);
-    state.rows = (Array.isArray(rows) ? rows : []).map(normalizeRow);
-    state.latestMonthKey = computeLatestMonthKey(state.rows);
-    const { min, max } = computeMinMaxMonthKey(state.rows);
-    state.minMonthKey = min;
-    state.maxMonthKey = max;
-
-    const companies = uniqueCompanies(state.rows);
-    if (state.selectedCompanies.size === 0) companies.forEach(c => state.selectedCompanies.add(c));
-    else for (const c of Array.from(state.selectedCompanies)) if (!companies.includes(c)) state.selectedCompanies.delete(c);
-
-    state.lastLoadedAtUtc = new Date();
-    ensureChartMetricOptions(true);
-    refresh();
-  } catch (err) {
-    console.error("applyCustomRangeFromSelectors error:", err);
-    alert("Failed to load range results: " + (err?.message || err));
-  } finally {
-    if (applyBtn) { applyBtn.disabled = false; applyBtn.textContent = prevText || "Apply Range"; }
+  if (!state.visibleMonths.length) {
+    alert("No months in selected range.");
+    return;
   }
+
+  refresh();
 }
 function applyCustomRangeFromSelectors_v2() { return applyCustomRangeFromSelectors(); }
 
 /* -------------------------
-   setLockedUI - must exist before init runs
+   setLockedUI
    ------------------------- */
 function setLockedUI(locked) {
   const lockScreen = document.getElementById("lockScreen");
