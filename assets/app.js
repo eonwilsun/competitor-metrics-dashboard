@@ -5,23 +5,36 @@
    Session / Edit Key helpers
    ------------------------- */
 const SESSION_KEY = "cmd.editKey.v1";
-function getEditKey() { try { return sessionStorage.getItem(SESSION_KEY) || ""; } catch (e) { return ""; } }
-function setEditKey(k) { try { sessionStorage.setItem(SESSION_KEY, String(k || "")); } catch (e) {} }
-function clearEditKey() { try { sessionStorage.removeItem(SESSION_KEY); } catch (e) {} }
+function getEditKey() {
+  try { return sessionStorage.getItem(SESSION_KEY) || ""; } catch (e) { return ""; }
+}
+function setEditKey(k) {
+  try { sessionStorage.setItem(SESSION_KEY, String(k || "")); } catch (e) {}
+}
+function clearEditKey() {
+  try { sessionStorage.removeItem(SESSION_KEY); } catch (e) {}
+}
 
 /* -------------------------
    Runtime config helpers (APP_CONFIG or sessionStorage)
    ------------------------- */
 function _getCfg(key) {
-  try { if (typeof window !== "undefined" && window.APP_CONFIG && window.APP_CONFIG[key]) { const v = String(window.APP_CONFIG[key] || "").trim(); if (v) return v; } } catch (e) {}
-  try { const s = sessionStorage.getItem(key); if (s && String(s).trim()) return String(s).trim(); } catch (e) {}
+  try {
+    if (typeof window !== "undefined" && window.APP_CONFIG && window.APP_CONFIG[key]) {
+      const v = String(window.APP_CONFIG[key] || "").trim();
+      if (v) return v;
+    }
+  } catch (e) {}
+  try {
+    const s = sessionStorage.getItem(key);
+    if (s && String(s).trim()) return String(s).trim();
+  } catch (e) {}
   return null;
 }
 
 /* -------------------------
    Xano / Zapier config helpers
    ------------------------- */
-// Note: App now prefers Xano only. Zapier helpers left for backward compatibility but not used.
 const DEFAULT_ZAPIER_URL = "https://hooks.zapier.com/hooks/catch/2414815/u7tlcn7/";
 function getZapierTableGetUrl() { return _getCfg("ZAPIER_TABLE_GET_URL") || DEFAULT_ZAPIER_URL; }
 function getZapierTablePatchUrl() { return _getCfg("ZAPIER_TABLE_PATCH_URL") || DEFAULT_ZAPIER_URL; }
@@ -34,8 +47,12 @@ function getXanoTablePatchUrl() { return _getCfg("XANO_TABLE_PATCH_URL"); }
 function getXanoConfigGetUrl() { return _getCfg("XANO_CONFIG_GET_URL"); }
 
 // Range trigger/result URL getters (server endpoints)
-function getRangeTriggerUrl() { return _getCfg("XANO_RANGE_TRIGGER_URL") || (XANO_BASE_URL + "/trigger/zap_range"); }
-function getRangeResultUrlBase() { return _getCfg("XANO_RANGE_RESULT_URL_BASE") || (XANO_BASE_URL + "/request_result"); }
+function getRangeTriggerUrl() {
+  return _getCfg("XANO_RANGE_TRIGGER_URL") || (XANO_BASE_URL + "/trigger/zap_range");
+}
+function getRangeResultUrlBase() {
+  return _getCfg("XANO_RANGE_RESULT_URL_BASE") || (XANO_BASE_URL + "/request_result");
+}
 
 /* -------------------------
    Xano defaults (fallback)
@@ -83,27 +100,88 @@ const CHART_METRICS = [
    Company ordering + colors
    ------------------------- */
 function normalizeCompanyName(name) { return String(name || "").trim(); }
-function companySort(a, b) { const aa = normalizeCompanyName(a); const bb = normalizeCompanyName(b); const aIsSwiis = aa.toLowerCase() === "swiis"; const bIsSwiis = bb.toLowerCase() === "swiis"; if (aIsSwiis && !bIsSwiis) return -1; if (!aIsSwiis && bIsSwiis) return 1; return aa.localeCompare(bb); }
-const COMPANY_COLORS = { swiis:"#ef5d2f", capstone:"#0d66a2", compass:"#1897d3", fca:"#f27a30", nfa:"#f9ae42", "orange grove":"#51277d", orangegrove:"#51277d", tact:"#b22288" };
-function companyColor(company) { const key = normalizeCompanyName(company).toLowerCase(); if (COMPANY_COLORS[key]) return COMPANY_COLORS[key]; let hash = 0; for (let i=0;i<key.length;i++) hash=(hash*31+key.charCodeAt(i))>>>0; return `hsl(${hash%360},70%,45%)`; }
+function companySort(a, b) {
+  const aa = normalizeCompanyName(a);
+  const bb = normalizeCompanyName(b);
+  const aIsSwiis = aa.toLowerCase() === "swiis";
+  const bIsSwiis = bb.toLowerCase() === "swiis";
+  if (aIsSwiis && !bIsSwiis) return -1;
+  if (!aIsSwiis && bIsSwiis) return 1;
+  return aa.localeCompare(bb);
+}
+const COMPANY_COLORS = {
+  swiis: "#ef5d2f",
+  capstone: "#0d66a2",
+  compass: "#1897d3",
+  fca: "#f27a30",
+  nfa: "#f9ae42",
+  "orange grove": "#51277d",
+  orangegrove: "#51277d",
+  tact: "#b22288"
+};
+function companyColor(company) {
+  const key = normalizeCompanyName(company).toLowerCase();
+  if (COMPANY_COLORS[key]) return COMPANY_COLORS[key];
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  return `hsl(${hash % 360},70%,45%)`;
+}
 
 /* -------------------------
    DOM + formatting helpers
    ------------------------- */
-function el(tag, attrs = {}, children = []) { const node = document.createElement(tag); for (const [k,val] of Object.entries(attrs)) { if (k==="className") node.className = val; else if (k==="text") node.textContent = val; else if (k==="html") node.innerHTML = val; else node.setAttribute(k, val); } for (const c of children) node.appendChild(c); return node; }
-function toNumberOrNull(v){ if (v===null||v===undefined||v==="") return null; const n=Number(v); return Number.isNaN(n)?null:n; }
-function normalizeText(v){ if (v===null||v===undefined) return null; const s=String(v).trim(); return s.length ? s : null; }
-function escapeHtml(s){ return String(s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;"); }
-function linkifyTextToHtml(text){ if (text===null||text===undefined) return ""; const safe=escapeHtml(String(text)); const urlRegex=/(https?:\/\/[^\s]+)/g; return safe.replace(urlRegex,(url)=>`<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`).replaceAll("\n","<br>"); }
+function el(tag, attrs = {}, children = []) {
+  const node = document.createElement(tag);
+  for (const [k, val] of Object.entries(attrs)) {
+    if (k === "className") node.className = val;
+    else if (k === "text") node.textContent = val;
+    else if (k === "html") node.innerHTML = val;
+    else node.setAttribute(k, val);
+  }
+  for (const c of children) node.appendChild(c);
+  return node;
+}
+function toNumberOrNull(v) {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isNaN(n) ? null : n;
+}
+function normalizeText(v) {
+  if (v === null || v === undefined) return null;
+  const s = String(v).trim();
+  return s.length ? s : null;
+}
+function escapeHtml(s) {
+  return String(s)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+function linkifyTextToHtml(text) {
+  if (text === null || text === undefined) return "";
+  const safe = escapeHtml(String(text));
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  return safe
+    .replace(urlRegex, (url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`)
+    .replaceAll("\n", "<br>");
+}
 
 /* -------------------------
    API fetch wrapper
    ------------------------- */
-async function apiFetch(url, { method="GET", body=null, headers={}, expectJson=true } = {}) {
-  const opts = { method, headers: { ...(headers||{}) } };
-  if (body !== null && body !== undefined) { opts.body = typeof body === "string" ? body : JSON.stringify(body); if (!opts.headers["Content-Type"]) opts.headers["Content-Type"] = "application/json"; }
+async function apiFetch(url, { method = "GET", body = null, headers = {}, expectJson = true } = {}) {
+  const opts = { method, headers: { ...(headers || {}) } };
+  if (body !== null && body !== undefined) {
+    opts.body = typeof body === "string" ? body : JSON.stringify(body);
+    if (!opts.headers["Content-Type"]) opts.headers["Content-Type"] = "application/json";
+  }
   const res = await fetch(url, opts);
-  if (!res.ok) { const text = await res.text().catch(()=>""); throw new Error(`API error ${res.status}: ${text || res.statusText}`); }
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`API error ${res.status}: ${text || res.statusText}`);
+  }
   if (!expectJson) return res;
   return await res.json();
 }
@@ -133,7 +211,10 @@ async function xanoFetch(pathOrUrl, { method = "GET", body = null, withEditKey =
   const opts = { method, headers };
   if (body !== null && body !== undefined) opts.body = JSON.stringify(body);
   const res = await fetch(full, opts);
-  if (!res.ok) { const text = await res.text().catch(()=> ""); throw new Error(`Xano error ${res.status}: ${text || res.statusText}`); }
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Xano error ${res.status}: ${text || res.statusText}`);
+  }
   return await res.json();
 }
 
@@ -141,7 +222,6 @@ async function xanoFetch(pathOrUrl, { method = "GET", body = null, withEditKey =
    Backend adapter (Xano primary)
    ------------------------- */
 async function fetchRowsFromBackend() {
-  // Use Xano only
   const xanoUrl = getXanoTableGetUrl() || (XANO_BASE_URL + XANO_TABLE_PATH);
   if (!xanoUrl) {
     console.warn("fetchRowsFromBackend: no Xano URL configured");
@@ -150,7 +230,6 @@ async function fetchRowsFromBackend() {
   try {
     console.debug("fetchRowsFromBackend: fetching from Xano:", xanoUrl);
     const res = await apiFetch(xanoUrl, { method: "GET" });
-    // Normalize shapes
     if (Array.isArray(res)) return res;
     if (res && Array.isArray(res.items)) return res.items;
     if (res && Array.isArray(res.data)) return res.data;
@@ -163,9 +242,8 @@ async function fetchRowsFromBackend() {
 }
 
 async function patchRowToBackend(rowId, fields) {
-  // Patch Xano record directly
   const base = getXanoTablePatchUrl() || (XANO_BASE_URL + XANO_TABLE_PATH);
-  const url = `${base.replace(/\/$/,"")}/${encodeURIComponent(rowId)}`;
+  const url = `${base.replace(/\/$/, "")}/${encodeURIComponent(rowId)}`;
   const updated = await apiFetch(url, { method: "PATCH", body: fields });
   return updated;
 }
@@ -224,35 +302,154 @@ async function verifyPassword(pw) {
 /* -------------------------
    State & normalization
    ------------------------- */
-const state = { visibleMonths: [], rangeStartKey: null, rangeEndKey: null, minMonthKey: null, maxMonthKey: null, selectedCompanies: new Set(), rows: [], latestMonthKey: null, lastLoadedAtUtc: null };
+const state = {
+  visibleMonths: [],
+  rangeStartKey: null,
+  rangeEndKey: null,
+  minMonthKey: null,
+  maxMonthKey: null,
+  selectedCompanies: new Set(),
+  rows: [],
+  latestMonthKey: null,
+  lastLoadedAtUtc: null
+};
 
-function getObj(root){ return root && typeof root === "object" ? root : {}; }
-function readPostsImages(row){ return toNumberOrNull(getObj(row?.number_of_monthly_instagram_posts).image_graphic); }
-function readPostsReels(row){ return toNumberOrNull(getObj(row?.number_of_monthly_instagram_posts).reels_video); }
-function readEngagementTotal(row){ return toNumberOrNull(getObj(row?.monthly_instagram_engagement).total_engagement); }
-function readEngagementRate(row){ return toNumberOrNull(getObj(row?.monthly_instagram_engagement).engagement_rate_percentage); }
-function normalizeRow(row) { const r = { ...row }; const feeObj = r.agency_fee_one_child; if (feeObj && typeof feeObj === "object") { r.agency_fee_one_child_weekly = toNumberOrNull(feeObj.Weekly ?? feeObj.weekly); r.agency_fee_one_child_yearly = toNumberOrNull(feeObj.Yearly ?? feeObj.yearly); } r.posts_images = readPostsImages(r) ?? 0; r.posts_reels = readPostsReels(r) ?? 0; r.posts_total = (toNumberOrNull(r.posts_images) || 0) + (toNumberOrNull(r.posts_reels) || 0); r.engagement_total = readEngagementTotal(r); r.engagement_rate_percentage = readEngagementRate(r); r.monthly_press_coverage = normalizeText(r.monthly_press_coverage); return r; }
-function getRowId(row) { const id = row?.id ?? row?.competitor_metrics_dashboard_id; return (id===null||id===undefined||id==="")?null:id; }
+function getObj(root) { return root && typeof root === "object" ? root : {}; }
+function readPostsImages(row) { return toNumberOrNull(getObj(row?.number_of_monthly_instagram_posts).image_graphic); }
+function readPostsReels(row) { return toNumberOrNull(getObj(row?.number_of_monthly_instagram_posts).reels_video); }
+function readEngagementTotal(row) { return toNumberOrNull(getObj(row?.monthly_instagram_engagement).total_engagement); }
+function readEngagementRate(row) { return toNumberOrNull(getObj(row?.monthly_instagram_engagement).engagement_rate_percentage); }
+
+function normalizeRow(row) {
+  const r = { ...row };
+  const feeObj = r.agency_fee_one_child;
+  if (feeObj && typeof feeObj === "object") {
+    r.agency_fee_one_child_weekly = toNumberOrNull(feeObj.Weekly ?? feeObj.weekly);
+    r.agency_fee_one_child_yearly = toNumberOrNull(feeObj.Yearly ?? feeObj.yearly);
+  }
+  r.posts_images = readPostsImages(r) ?? 0;
+  r.posts_reels = readPostsReels(r) ?? 0;
+  r.posts_total = (toNumberOrNull(r.posts_images) || 0) + (toNumberOrNull(r.posts_reels) || 0);
+  r.engagement_total = readEngagementTotal(r);
+  r.engagement_rate_percentage = readEngagementRate(r);
+  r.monthly_press_coverage = normalizeText(r.monthly_press_coverage);
+  return r;
+}
+function getRowId(row) {
+  const id = row?.id ?? row?.competitor_metrics_dashboard_id;
+  return (id === null || id === undefined || id === "") ? null : id;
+}
 
 /* -------------------------
    Patch builder
    ------------------------- */
-function buildPatchBodyForMetric(row, fieldKey, rawNum) { const num = Number(rawNum); if (fieldKey === "agency_fee_one_child_weekly" || fieldKey === "agency_fee_one_child_yearly") { const rootKey = "agency_fee_one_child"; const childKey = fieldKey==="agency_fee_one_child_weekly" ? "Weekly" : "Yearly"; const current = (row && typeof row[rootKey]==="object"&&row[rootKey])?row[rootKey]:{}; return { [rootKey]: { ...current, [childKey]: Math.round(num) } }; } if (fieldKey === "posts_images" || fieldKey === "posts_reels") { const rootKey = "number_of_monthly_instagram_posts"; const current=(row&&typeof row[rootKey]==="object"&&row[rootKey])?row[rootKey]:{}; const next={...current}; if(fieldKey==="posts_images") next.image_graphic=Math.round(num); if(fieldKey==="posts_reels") next.reels_video=Math.round(num); next.number_of_monthly_instagram_posts_total=(toNumberOrNull(next.image_graphic)||0)+(toNumberOrNull(next.reels_video)||0); return { [rootKey]: next }; } if (fieldKey==="posts_total") return null; if (fieldKey==="engagement_total"||fieldKey==="engagement_rate_percentage"){ const rootKey="monthly_instagram_engagement"; const current=(row&&typeof row[rootKey]==="object"&&row[rootKey])?row[rootKey]:{}; const next={...current}; if(fieldKey==="engagement_total") next.total_engagement=Math.round(num); if(fieldKey==="engagement_rate_percentage") next.engagement_rate_percentage=num; return { [rootKey]: next }; } return { [fieldKey]: Math.round(num) }; }
+function buildPatchBodyForMetric(row, fieldKey, rawNum) {
+  const num = Number(rawNum);
+
+  if (fieldKey === "agency_fee_one_child_weekly" || fieldKey === "agency_fee_one_child_yearly") {
+    const rootKey = "agency_fee_one_child";
+    const childKey = fieldKey === "agency_fee_one_child_weekly" ? "Weekly" : "Yearly";
+    const current = (row && typeof row[rootKey] === "object" && row[rootKey]) ? row[rootKey] : {};
+    return { [rootKey]: { ...current, [childKey]: Math.round(num) } };
+  }
+
+  if (fieldKey === "posts_images" || fieldKey === "posts_reels") {
+    const rootKey = "number_of_monthly_instagram_posts";
+    const current = (row && typeof row[rootKey] === "object" && row[rootKey]) ? row[rootKey] : {};
+    const next = { ...current };
+    if (fieldKey === "posts_images") next.image_graphic = Math.round(num);
+    if (fieldKey === "posts_reels") next.reels_video = Math.round(num);
+    next.number_of_monthly_instagram_posts_total =
+      (toNumberOrNull(next.image_graphic) || 0) + (toNumberOrNull(next.reels_video) || 0);
+    return { [rootKey]: next };
+  }
+
+  if (fieldKey === "posts_total") return null;
+
+  if (fieldKey === "engagement_total" || fieldKey === "engagement_rate_percentage") {
+    const rootKey = "monthly_instagram_engagement";
+    const current = (row && typeof row[rootKey] === "object" && row[rootKey]) ? row[rootKey] : {};
+    const next = { ...current };
+    if (fieldKey === "engagement_total") next.total_engagement = Math.round(num);
+    if (fieldKey === "engagement_rate_percentage") next.engagement_rate_percentage = num;
+    return { [rootKey]: next };
+  }
+
+  return { [fieldKey]: Math.round(num) };
+}
 
 /* -------------------------
    Month helpers & compute helpers
    ------------------------- */
-const MONTHS = { january:"01", february:"02", march:"03", april:"04", may:"05", june:"06", july:"07", august:"08", september:"09", october:"10", november:"11", december:"12" };
-const MONTH_LABELS = [ {name:"January",value:"01"},{name:"February",value:"02"},{name:"March",value:"03"},{name:"April",value:"04"},{name:"May",value:"05"},{name:"June",value:"06"},{name:"July",value:"07"},{name:"August",value:"08"},{name:"September",value:"09"},{name:"October",value:"10"},{name:"November",value:"11"},{name:"December",value:"12"} ];
+const MONTHS = {
+  january: "01",
+  february: "02",
+  march: "03",
+  april: "04",
+  may: "05",
+  june: "06",
+  july: "07",
+  august: "08",
+  september: "09",
+  october: "10",
+  november: "11",
+  december: "12"
+};
+const MONTH_LABELS = [
+  { name: "January", value: "01" },
+  { name: "February", value: "02" },
+  { name: "March", value: "03" },
+  { name: "April", value: "04" },
+  { name: "May", value: "05" },
+  { name: "June", value: "06" },
+  { name: "July", value: "07" },
+  { name: "August", value: "08" },
+  { name: "September", value: "09" },
+  { name: "October", value: "10" },
+  { name: "November", value: "11" },
+  { name: "December", value: "12" }
+];
 
-function monthKeyFromYearMonthName(year, monthName) { const mm = MONTHS[String(monthName||"").toLowerCase()]; if(!mm) return null; return `${year}-${mm}`; }
-function monthKeyFromYYYYMMParts(year, mm) { return `${String(year).trim()}-${String(mm).padStart(2,"0")}`; }
-function parseMonthKey(mk){ if(!mk||typeof mk!=="string"||mk.length<7) return null; const [y,m]=mk.split("-"); return { year: Number(y), month: String(m).padStart(2,"0") }; }
-function compareMonthKey(a,b){ return String(a).localeCompare(String(b)); }
-function listMonthKeysBetween(startKey,endKey){ const s=parseMonthKey(startKey), e=parseMonthKey(endKey); if(!s||!e) return []; const start=new Date(Date.UTC(s.year, Number(s.month)-1,1)), end=new Date(Date.UTC(e.year, Number(e.month)-1,1)); if(start> end) return []; const out=[]; const cur=new Date(start); while(cur<=end){ out.push(`${cur.getUTCFullYear()}-${String(cur.getUTCMonth()+1).padStart(2,"0")}`); cur.setUTCMonth(cur.getUTCMonth()+1);} return out; }
-function currentMonthKeyUTC(){ const now=new Date(); return `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,"0")}`; }
-function previousMonthKeyUTC(monthKey){ const p=parseMonthKey(monthKey); if(!p) return null; const dt=new Date(Date.UTC(p.year, Number(p.month)-1,1)); dt.setUTCMonth(dt.getUTCMonth()-1); return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth()+1).padStart(2,"0")}`; }
-function lastMonthKeyUtcYYYYMM(){ return previousMonthKeyUTC(currentMonthKeyUTC()); }
+function monthKeyFromYearMonthName(year, monthName) {
+  const mm = MONTHS[String(monthName || "").toLowerCase()];
+  if (!mm) return null;
+  return `${year}-${mm}`;
+}
+function monthKeyFromYYYYMMParts(year, mm) {
+  return `${String(year).trim()}-${String(mm).padStart(2, "0")}`;
+}
+function parseMonthKey(mk) {
+  if (!mk || typeof mk !== "string" || mk.length < 7) return null;
+  const [y, m] = mk.split("-");
+  return { year: Number(y), month: String(m).padStart(2, "0") };
+}
+function compareMonthKey(a, b) { return String(a).localeCompare(String(b)); }
+function listMonthKeysBetween(startKey, endKey) {
+  const s = parseMonthKey(startKey), e = parseMonthKey(endKey);
+  if (!s || !e) return [];
+  const start = new Date(Date.UTC(s.year, Number(s.month) - 1, 1));
+  const end = new Date(Date.UTC(e.year, Number(e.month) - 1, 1));
+  if (start > end) return [];
+  const out = [];
+  const cur = new Date(start);
+  while (cur <= end) {
+    out.push(`${cur.getUTCFullYear()}-${String(cur.getUTCMonth() + 1).padStart(2, "0")}`);
+    cur.setUTCMonth(cur.getUTCMonth() + 1);
+  }
+  return out;
+}
+function currentMonthKeyUTC() {
+  const now = new Date();
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+function previousMonthKeyUTC(monthKey) {
+  const p = parseMonthKey(monthKey);
+  if (!p) return null;
+  const dt = new Date(Date.UTC(p.year, Number(p.month) - 1, 1));
+  dt.setUTCMonth(dt.getUTCMonth() - 1);
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+function lastMonthKeyUtcYYYYMM() { return previousMonthKeyUTC(currentMonthKeyUTC()); }
 
 function computeLatestMonthKey(rows) {
   const keys = (Array.isArray(rows) ? rows : [])
@@ -270,64 +467,91 @@ function computeMinMaxMonthKey(rows) {
 }
 
 /* -------------------------
-   applyCustomRangeFromSelectors + alias (server-backed)
-   This still uses the server trigger/poll flow if you have it configured.
+   Range trigger/poll helpers (server-backed)
    ------------------------- */
 async function requestRangeFromServer(payload) {
-  const url = sessionStorage.getItem('XANO_RANGE_TRIGGER_URL') || getRangeTriggerUrl();
-  if (!url) throw new Error('No XANO range trigger URL configured.');
-  const headers = { 'Content-Type': 'application/json' };
+  const url = sessionStorage.getItem("XANO_RANGE_TRIGGER_URL") || getRangeTriggerUrl();
+  if (!url) throw new Error("No XANO range trigger URL configured.");
+  const headers = { "Content-Type": "application/json" };
   const k = getEditKey();
-  if (k) headers['x-edit-key'] = k;
-  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload) });
+  if (k) headers["x-edit-key"] = k;
+  const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(payload) });
   if (!res.ok) {
-    const t = await res.text().catch(()=>res.statusText);
+    const t = await res.text().catch(() => res.statusText);
     throw new Error(`Range trigger failed: ${res.status} ${t}`);
   }
-  return await res.json().catch(()=> ({ request_id: payload.request_id, status: 'pending' }));
+  return await res.json().catch(() => ({ request_id: payload.request_id, status: "pending" }));
 }
+
 async function pollRangeResults(requestId, attempts = 30, delayMs = 1000) {
-  const base = sessionStorage.getItem('XANO_RANGE_RESULT_URL_BASE') || getRangeResultUrlBase();
-  if (!base) throw new Error('No XANO range result URL configured.');
+  const base = sessionStorage.getItem("XANO_RANGE_RESULT_URL_BASE") || getRangeResultUrlBase();
+  if (!base) throw new Error("No XANO range result URL configured.");
   const key = getEditKey();
-  const url = base + (base.includes('?') ? '&' : '?') + 'request_id=' + encodeURIComponent(requestId);
+  const url = base + (base.includes("?") ? "&" : "?") + "request_id=" + encodeURIComponent(requestId);
   for (let i = 0; i < attempts; i++) {
     try {
-      const headers = { 'Accept': 'application/json' };
-      if (key) headers['x-edit-key'] = key;
-      const res = await fetch(url, { method: 'GET', headers, cache: 'no-store' });
+      const headers = { Accept: "application/json" };
+      if (key) headers["x-edit-key"] = key;
+      const res = await fetch(url, { method: "GET", headers, cache: "no-store" });
       if (res.status === 200) {
-        const json = await res.json().catch(()=>null);
-        if (json && json.status === 'ready') return json.rows || [];
+        const json = await res.json().catch(() => null);
+        if (json && json.status === "ready") return json.rows || [];
       }
-    } catch (err) { console.warn('pollRangeResults transient error', err); }
+    } catch (err) {
+      console.warn("pollRangeResults transient error", err);
+    }
     await new Promise(r => setTimeout(r, delayMs));
   }
-  throw new Error('Timed out waiting for range results from server.');
+  throw new Error("Timed out waiting for range results from server.");
 }
+
 async function applyCustomRangeFromSelectors() {
-  const startKey = monthKeyFromYYYYMMParts((document.getElementById("startYear") || {}).value, (document.getElementById("startMonth") || {}).value);
-  const endKey = monthKeyFromYYYYMMParts((document.getElementById("endYear") || {}).value, (document.getElementById("endMonth") || {}).value);
+  const startKey = monthKeyFromYYYYMMParts(
+    (document.getElementById("startYear") || {}).value,
+    (document.getElementById("startMonth") || {}).value
+  );
+  const endKey = monthKeyFromYYYYMMParts(
+    (document.getElementById("endYear") || {}).value,
+    (document.getElementById("endMonth") || {}).value
+  );
+
   if (!startKey || !endKey) return alert("Please select start and end month/year.");
   if (compareMonthKey(startKey, endKey) > 0) return alert("Start month must be before (or the same as) End month.");
-  state.rangeStartKey = startKey; state.rangeEndKey = endKey; state.visibleMonths = listMonthKeysBetween(startKey, endKey);
-  const applyBtn = document.getElementById("applyRange"); const prevText = applyBtn ? applyBtn.textContent : null;
+
+  state.rangeStartKey = startKey;
+  state.rangeEndKey = endKey;
+  state.visibleMonths = listMonthKeysBetween(startKey, endKey);
+
+  const applyBtn = document.getElementById("applyRange");
+  const prevText = applyBtn ? applyBtn.textContent : null;
+
   try {
     if (applyBtn) { applyBtn.disabled = true; applyBtn.textContent = "Working..."; }
-    const requestId = `req-${Date.now()}-${Math.floor(Math.random()*10000)}`;
+
+    const requestId = `req-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     const s = parseMonthKey(startKey), e = parseMonthKey(endKey);
-    const payload = { request_id: requestId, start_year: s.year, start_month: String(s.month).padStart(2,"0"), end_year: e.year, end_month: String(e.month).padStart(2,"0") };
+    const payload = {
+      request_id: requestId,
+      start_year: s.year,
+      start_month: String(s.month).padStart(2, "0"),
+      end_year: e.year,
+      end_month: String(e.month).padStart(2, "0")
+    };
     const companyInput = document.getElementById("companyFilter") || document.getElementById("company-filter");
     if (companyInput && companyInput.value) payload.company = companyInput.value;
+
     await requestRangeFromServer(payload);
     const rows = await pollRangeResults(requestId, 60, 1000);
     state.rows = (Array.isArray(rows) ? rows : []).map(normalizeRow);
     state.latestMonthKey = computeLatestMonthKey(state.rows);
     const { min, max } = computeMinMaxMonthKey(state.rows);
-    state.minMonthKey = min; state.maxMonthKey = max;
+    state.minMonthKey = min;
+    state.maxMonthKey = max;
+
     const companies = uniqueCompanies(state.rows);
     if (state.selectedCompanies.size === 0) companies.forEach(c => state.selectedCompanies.add(c));
     else for (const c of Array.from(state.selectedCompanies)) if (!companies.includes(c)) state.selectedCompanies.delete(c);
+
     state.lastLoadedAtUtc = new Date();
     ensureChartMetricOptions(true);
     refresh();
@@ -343,7 +567,7 @@ function applyCustomRangeFromSelectors_v2() { return applyCustomRangeFromSelecto
 /* -------------------------
    setLockedUI - must exist before init runs
    ------------------------- */
-function setLockedUI(locked){
+function setLockedUI(locked) {
   const lockScreen = document.getElementById("lockScreen");
   const appRoot = document.getElementById("appRoot");
   const lockBtn = document.getElementById("lockBtn");
@@ -359,7 +583,7 @@ function setLockedUI(locked){
 }
 
 /* -------------------------
-   Chart / render / UI functions (complete)
+   Chart / render / UI functions
    ------------------------- */
 let metricChart = null;
 let editModalState = null, editTextModalState = null, editNotesModalState = null;
@@ -376,12 +600,15 @@ function ensureChartMetricOptions(force = false) {
       opt.textContent = m.label;
       sel.appendChild(opt);
     }
-    const want = prev && CHART_METRICS.some(x => x.key === prev) ? prev : (CHART_METRICS[0]?.key || "");
+    const want = prev && CHART_METRICS.some(x => x.key === prev)
+      ? prev
+      : (CHART_METRICS[0]?.key || "");
     if (want) sel.value = want;
   }
 }
-
-function destroyChart() { if (metricChart) { metricChart.destroy(); metricChart = null; } }
+function destroyChart() {
+  if (metricChart) { metricChart.destroy(); metricChart = null; }
+}
 
 function getNumericMetricValue(row, metricKey) {
   if (!row) return null;
@@ -399,23 +626,33 @@ function renderChart() {
   const metricKey = sel.value;
   if (!metricKey) return;
   const metricLabel = CHART_METRICS.find(m => m.key === metricKey)?.label || metricKey;
-  const visibleMonths = state.visibleMonths.length ? state.visibleMonths : (state.latestMonthKey ? [state.latestMonthKey] : []);
+
+  const visibleMonths = state.visibleMonths.length
+    ? state.visibleMonths
+    : (state.latestMonthKey ? [state.latestMonthKey] : []);
   if (!visibleMonths.length) return;
   const singleMonth = visibleMonths.length === 1;
+
   const companies = uniqueCompanies(state.rows).filter(c => state.selectedCompanies.has(c));
+
   if (modeLabel) {
     modeLabel.textContent = singleMonth
       ? `(Bar • ${visibleMonths[0]})`
       : `(Line • ${visibleMonths[0]} → ${visibleMonths[visibleMonths.length - 1]})`;
   }
+
   destroyChart();
+
   if (singleMonth) {
     const mk = visibleMonths[0];
     const values = companies.map(c => getNumericMetricValue(findRowByCompanyAndMonth(c, mk), metricKey) ?? 0);
     const colors = companies.map(companyColor);
     metricChart = new Chart(canvas, {
       type: "bar",
-      data: { labels: companies, datasets: [{ label: metricLabel, data: values, backgroundColor: colors }] },
+      data: {
+        labels: companies,
+        datasets: [{ label: metricLabel, data: values, backgroundColor: colors }]
+      },
       options: { responsive: true, plugins: { legend: { display: true } }, scales: { y: { beginAtZero: true } } }
     });
   } else {
@@ -434,13 +671,37 @@ function renderChart() {
 
 function formatValue(v, format) {
   if (v === null || v === undefined || v === "") return "—";
-  if (format === "int") { const n = Number(v); if (!Number.isFinite(n)) return "—"; return Math.round(n).toLocaleString(); }
-  if (format === "float") { const n = Number(v); if (!Number.isFinite(n)) return "—"; const fixed = n.toFixed(2); return fixed.replace(/\.00$/, "").replace(/(\.\d)0$/, "$1"); }
+  if (format === "int") {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return "—";
+    return Math.round(n).toLocaleString();
+  }
+  if (format === "float") {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return "—";
+    const fixed = n.toFixed(2);
+    return fixed.replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
+  }
   return String(v);
 }
-
-function extractPostsTotal(obj){ if(!obj||typeof obj!=="object") return toNumberOrNull(obj); return toNumberOrNull(obj.number_of_monthly_instagram_posts_total ?? obj.Total ?? obj.total ?? obj.total_posts); }
-function extractEngagementTotal(obj){ if(!obj||typeof obj!=="object") return toNumberOrNull(obj); return toNumberOrNull(obj.total_engagement ?? obj.Total ?? obj.total ?? obj.totalEngagement); }
+function extractPostsTotal(obj) {
+  if (!obj || typeof obj !== "object") return toNumberOrNull(obj);
+  return toNumberOrNull(
+    obj.number_of_monthly_instagram_posts_total ??
+    obj.Total ??
+    obj.total ??
+    obj.total_posts
+  );
+}
+function extractEngagementTotal(obj) {
+  if (!obj || typeof obj !== "object") return toNumberOrNull(obj);
+  return toNumberOrNull(
+    obj.total_engagement ??
+    obj.Total ??
+    obj.total ??
+    obj.totalEngagement
+  );
+}
 
 function buildMetricsTable(visibleMonths, companies) {
   const table = el("table");
@@ -450,127 +711,389 @@ function buildMetricsTable(visibleMonths, companies) {
   trh.appendChild(el("th", { text: "Month(s)" }));
   for (const f of METRIC_FIELDS) trh.appendChild(el("th", { text: f.label }));
   trh.appendChild(el("th", { text: "Notes" }));
-  thead.appendChild(trh); table.appendChild(thead);
+  thead.appendChild(trh);
+  table.appendChild(thead);
+
   const tbody = el("tbody");
   const singleMonth = visibleMonths.length === 1;
+
   for (const companyName of companies) {
     const tr = el("tr");
     tr.appendChild(el("td", { text: companyName }));
     tr.appendChild(el("td", { text: singleMonth ? visibleMonths[0] : `${visibleMonths.length} months` }));
+
     for (const f of METRIC_FIELDS) {
       let displayValue = null, editTargetRow = null, editMonthKey = null;
-      if (singleMonth) { editMonthKey = visibleMonths[0]; editTargetRow = findRowByCompanyAndMonth(companyName, editMonthKey); displayValue = editTargetRow ? editTargetRow[f.key] : null; }
-      else { if (f.format === "int" || f.format === "float") displayValue = averageNumericForCompanyAcrossMonths(companyName, visibleMonths, f.key); else displayValue = null; }
+
+      if (singleMonth) {
+        editMonthKey = visibleMonths[0];
+        editTargetRow = findRowByCompanyAndMonth(companyName, editMonthKey);
+        displayValue = editTargetRow ? editTargetRow[f.key] : null;
+      } else {
+        if (f.format === "int" || f.format === "float") {
+          displayValue = averageNumericForCompanyAcrossMonths(
+            companyName,
+            visibleMonths,
+            f.key
+          );
+        } else {
+          displayValue = null;
+        }
+      }
+
       const td = el("td");
+
       if (f.format === "richtext") {
         const html = displayValue ? linkifyTextToHtml(displayValue) : "—";
-        const div = el("div", { className: `clickable-metric metrics-rich${(!displayValue ? " muted-cell" : "")}`, html, title: singleMonth ? "Click to edit" : "Shown only in single-month view" });
-        if (singleMonth && editTargetRow && f.editable) div.addEventListener("click", (e) => { if (e.target && e.target.closest && e.target.closest("a")) return; openEditTextModal({ row: editTargetRow, fieldKey: f.key, fieldLabel: f.label, currentValue: editTargetRow[f.key], monthKey: editMonthKey }); });
-        td.appendChild(div); tr.appendChild(td); continue;
+        const div = el("div", {
+          className: `clickable-metric metrics-rich${(!displayValue ? " muted-cell" : "")}`,
+          html,
+          title: singleMonth ? "Click to edit" : "Shown only in single-month view"
+        });
+        if (singleMonth && editTargetRow && f.editable) {
+          div.addEventListener("click", (e) => {
+            if (e.target && e.target.closest && e.target.closest("a")) return;
+            openEditTextModal({
+              row: editTargetRow,
+              fieldKey: f.key,
+              fieldLabel: f.label,
+              currentValue: editTargetRow[f.key],
+              monthKey: editMonthKey
+            });
+          });
+        }
+        td.appendChild(div);
+        tr.appendChild(td);
+        continue;
       }
+
       const isEmpty = displayValue === null || displayValue === undefined || displayValue === "";
-      const span = el("span", { className: `clickable-metric metrics-num${isEmpty ? " muted-cell" : ""}`, text: formatValue(displayValue, f.format), title: singleMonth ? (f.readOnly ? "Derived (edit Images/Reels)" : "Click to edit") : "Averaged across selected months" });
-      if (singleMonth && editTargetRow && !f.readOnly) span.addEventListener("click", () => openEditMetricModal({ row: editTargetRow, fieldKey: f.key, fieldLabel: f.label, currentValue: editTargetRow[f.key], monthKey: editMonthKey }));
-      td.appendChild(span); tr.appendChild(td);
+      const span = el("span", {
+        className: `clickable-metric metrics-num${isEmpty ? " muted-cell" : ""}`,
+        text: formatValue(displayValue, f.format),
+        title: singleMonth ? (f.readOnly ? "Derived (edit Images/Reels)" : "Click to edit") : "Averaged across selected months"
+      });
+      if (singleMonth && editTargetRow && !f.readOnly) {
+        span.addEventListener("click", () => openEditMetricModal({
+          row: editTargetRow,
+          fieldKey: f.key,
+          fieldLabel: f.label,
+          currentValue: editTargetRow[f.key],
+          monthKey: editMonthKey
+        }));
+      }
+      td.appendChild(span);
+      tr.appendChild(td);
     }
-    const notesTd = el("td"); let notesRow = null, mk = null; if (singleMonth) { mk = visibleMonths[0]; notesRow = findRowByCompanyAndMonth(companyName, mk); }
+
+    const notesTd = el("td");
+    let notesRow = null, mk = null;
+    if (singleMonth) {
+      mk = visibleMonths[0];
+      notesRow = findRowByCompanyAndMonth(companyName, mk);
+    }
     const notesText = singleMonth ? (notesRow?.[NOTES_FIELD_KEY] ?? "") : "";
     const notesPreview = normalizeText(notesText) ? linkifyTextToHtml(notesText) : "—";
-    const notesDiv = el("div", { className: `clickable-metric metrics-rich${(normalizeText(notesText) ? "" : " muted-cell")}`, html: notesPreview, title: singleMonth ? "Click to edit notes" : "Switch to a single month to edit notes" });
-    if (singleMonth && notesRow) notesDiv.addEventListener("click", (e) => { if (e.target && e.target.closest && e.target.closest("a")) return; openEditNotesModal({ row: notesRow, monthKey: mk }); });
-    notesTd.appendChild(notesDiv); tr.appendChild(notesTd); tbody.appendChild(tr);
+    const notesDiv = el("div", {
+      className: `clickable-metric metrics-rich${(normalizeText(notesText) ? "" : " muted-cell")}`,
+      html: notesPreview,
+      title: singleMonth ? "Click to edit notes" : "Switch to a single month to edit notes"
+    });
+    if (singleMonth && notesRow) {
+      notesDiv.addEventListener("click", (e) => {
+        if (e.target && e.target.closest && e.target.closest("a")) return;
+        openEditNotesModal({ row: notesRow, monthKey: mk });
+      });
+    }
+    notesTd.appendChild(notesDiv);
+    tr.appendChild(notesTd);
+
+    tbody.appendChild(tr);
   }
-  table.appendChild(tbody); return table;
+
+  table.appendChild(tbody);
+  return table;
 }
 
-/* ---------- Modals wiring (fully defined) ---------- */
+/* ---------- Modals wiring ---------- */
 function openEditMetricModal({ row, fieldKey, fieldLabel, currentValue, monthKey }) {
   editModalState = { row, fieldKey, monthKey };
-  const backdrop = document.getElementById("editMetricModalBackdrop"); if (!backdrop) return;
+  const backdrop = document.getElementById("editMetricModalBackdrop");
+  if (!backdrop) return;
   document.getElementById("editMetricSubtitle").textContent = `${row.company} • ${monthKey} • ${fieldLabel}`;
   document.getElementById("editMetricHint").textContent = "This updates the value in backend.";
   const input = document.getElementById("editMetricNewValue");
   if (input) input.value = (currentValue === null || currentValue === undefined) ? "" : String(currentValue);
-  backdrop.style.display = "flex"; backdrop.setAttribute("aria-hidden", "false"); setTimeout(() => input && input.focus(), 0);
+  backdrop.style.display = "flex";
+  backdrop.setAttribute("aria-hidden", "false");
+  setTimeout(() => input && input.focus(), 0);
 }
-function closeEditMetricModal() { const b = document.getElementById("editMetricModalBackdrop"); if (!b) return; b.style.display = "none"; b.setAttribute("aria-hidden", "true"); editModalState = null; }
+function closeEditMetricModal() {
+  const b = document.getElementById("editMetricModalBackdrop");
+  if (!b) return;
+  b.style.display = "none";
+  b.setAttribute("aria-hidden", "true");
+  editModalState = null;
+}
 function openEditTextModal({ row, fieldKey, fieldLabel, currentValue, monthKey }) {
   editTextModalState = { row, fieldKey, monthKey };
-  const b = document.getElementById("editTextModalBackdrop"); if (!b) return;
+  const b = document.getElementById("editTextModalBackdrop");
+  if (!b) return;
   document.getElementById("editTextSubtitle").textContent = `${row.company} • ${monthKey} • ${fieldLabel}`;
   document.getElementById("editTextHint").textContent = "Multiple lines supported. Ctrl+Enter saves.";
-  const ta = document.getElementById("editTextNewValue"); if (ta) ta.value = (currentValue === null || currentValue === undefined) ? "" : String(currentValue);
+  const ta = document.getElementById("editTextNewValue");
+  if (ta) ta.value = (currentValue === null || currentValue === undefined) ? "" : String(currentValue);
   document.getElementById("editTextUpdate").dataset.mode = "press";
-  b.style.display = "flex"; b.setAttribute("aria-hidden", "false"); setTimeout(() => ta && ta.focus(), 0);
+  b.style.display = "flex";
+  b.setAttribute("aria-hidden", "false");
+  setTimeout(() => ta && ta.focus(), 0);
 }
 function openEditNotesModal({ row, monthKey }) {
   editNotesModalState = { row, monthKey };
-  const b = document.getElementById("editTextModalBackdrop"); if (!b) return;
+  const b = document.getElementById("editTextModalBackdrop");
+  if (!b) return;
   document.getElementById("editTextSubtitle").textContent = `${row.company} • ${monthKey} • Notes`;
   document.getElementById("editTextHint").textContent = "Edit notes (multi-line). Ctrl+Enter saves.";
-  const ta = document.getElementById("editTextNewValue"); if (ta) ta.value = row?.[NOTES_FIELD_KEY] ?? "";
+  const ta = document.getElementById("editTextNewValue");
+  if (ta) ta.value = row?.[NOTES_FIELD_KEY] ?? "";
   document.getElementById("editTextUpdate").dataset.mode = "notes";
-  b.style.display = "flex"; b.setAttribute("aria-hidden", "false"); setTimeout(() => ta && ta.focus(), 0);
+  b.style.display = "flex";
+  b.setAttribute("aria-hidden", "false");
+  setTimeout(() => ta && ta.focus(), 0);
 }
-function closeEditTextModal() { const b = document.getElementById("editTextModalBackdrop"); if (!b) return; b.style.display = "none"; b.setAttribute("aria-hidden", "true"); editTextModalState = null; editNotesModalState = null; document.getElementById("editTextUpdate").dataset.mode = ""; }
+function closeEditTextModal() {
+  const b = document.getElementById("editTextModalBackdrop");
+  if (!b) return;
+  b.style.display = "none";
+  b.setAttribute("aria-hidden", "true");
+  editTextModalState = null;
+  editNotesModalState = null;
+  document.getElementById("editTextUpdate").dataset.mode = "";
+}
 
-function wireEditModals(){
-  const emc=document.getElementById("editMetricClose"); if(emc) emc.addEventListener("click", closeEditMetricModal);
-  const emb=document.getElementById("editMetricModalBackdrop"); if(emb) emb.addEventListener("click",(e)=>{ if(e.target && e.target.id==="editMetricModalBackdrop") closeEditMetricModal(); });
-  const etc=document.getElementById("editTextClose"); if(etc) etc.addEventListener("click", closeEditTextModal);
-  const etb=document.getElementById("editTextModalBackdrop"); if(etb) etb.addEventListener("click",(e)=>{ if(e.target && e.target.id==="editTextModalBackdrop") closeEditTextModal(); });
-  const mi=document.getElementById("editMetricNewValue"); if(mi) mi.addEventListener("keydown",(e)=>{ if(e.key==="Enter"){ e.preventDefault(); document.getElementById("editMetricUpdate").click(); } });
-  const ti=document.getElementById("editTextNewValue"); if(ti) ti.addEventListener("keydown",(e)=>{ if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); document.getElementById("editTextUpdate").click(); } });
-  const mu=document.getElementById("editMetricUpdate"); if(mu) mu.addEventListener("click",async()=>{
-    if(!editModalState) return; const btn=mu; const raw=(document.getElementById("editMetricNewValue")||{}).value; if(raw===""||raw===null||raw===undefined) return alert("Enter a value."); const num=Number(raw); if(!Number.isFinite(num)) return alert("Please enter a valid number."); const { row, fieldKey } = editModalState; const rowId = getRowId(row); if(!rowId) return alert("Missing record id.");
-    try{ btn.disabled=true; btn.textContent="Saving..."; const body = buildPatchBodyForMetric(row, fieldKey, num); if(!body){ alert("Total is derived. Edit Images or Reels."); return; } await patchRowToBackend(rowId, body); closeEditMetricModal(); await reloadFromXanoAndRefresh(); }catch(err){ alert("Save failed: "+String(err?.message||err)); }finally{ btn.disabled=false; btn.textContent="Update"; }
+function wireEditModals() {
+  const emc = document.getElementById("editMetricClose");
+  if (emc) emc.addEventListener("click", closeEditMetricModal);
+
+  const emb = document.getElementById("editMetricModalBackdrop");
+  if (emb) emb.addEventListener("click", (e) => {
+    if (e.target && e.target.id === "editMetricModalBackdrop") closeEditMetricModal();
   });
-  const tu=document.getElementById("editTextUpdate"); if(tu) tu.addEventListener("click",async()=>{
-    const mode=tu.dataset.mode||""; const btn=tu; const val=(document.getElementById("editTextNewValue")||{}).value; const payloadVal=(val===""?null:val);
-    try{ btn.disabled=true; btn.textContent="Saving..."; if(mode==="press"){ const row=editTextModalState?.row; const rowId=getRowId(row); if(!rowId) return alert("Missing record id."); await patchRowToBackend(rowId, { monthly_press_coverage: payloadVal }); closeEditTextModal(); await reloadFromXanoAndRefresh(); return; } if(mode==="notes"){ const row=editNotesModalState?.row; const rowId=getRowId(row); if(!rowId) return alert("Missing record id."); await patchRowToBackend(rowId, { [NOTES_FIELD_KEY]: payloadVal }); closeEditTextModal(); await reloadFromXanoAndRefresh(); return; } }catch(err){ alert("Save failed: "+String(err?.message||err)); }finally{ btn.disabled=false; btn.textContent="Update"; }
+
+  const etc = document.getElementById("editTextClose");
+  if (etc) etc.addEventListener("click", closeEditTextModal);
+
+  const etb = document.getElementById("editTextModalBackdrop");
+  if (etb) etb.addEventListener("click", (e) => {
+    if (e.target && e.target.id === "editTextModalBackdrop") closeEditTextModal();
   });
-  window.addEventListener("keydown",(e)=>{ if(e.key!=="Escape") return; if(editModalState) closeEditMetricModal(); if(editTextModalState||editNotesModalState) closeEditTextModal(); });
+
+  const mi = document.getElementById("editMetricNewValue");
+  if (mi) mi.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      document.getElementById("editMetricUpdate").click();
+    }
+  });
+
+  const ti = document.getElementById("editTextNewValue");
+  if (ti) ti.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      document.getElementById("editTextUpdate").click();
+    }
+  });
+
+  const mu = document.getElementById("editMetricUpdate");
+  if (mu) mu.addEventListener("click", async () => {
+    if (!editModalState) return;
+    const btn = mu;
+    const raw = (document.getElementById("editMetricNewValue") || {}).value;
+    if (raw === "" || raw === null || raw === undefined) return alert("Enter a value.");
+    const num = Number(raw);
+    if (!Number.isFinite(num)) return alert("Please enter a valid number.");
+    const { row, fieldKey } = editModalState;
+    const rowId = getRowId(row);
+    if (!rowId) return alert("Missing record id.");
+    try {
+      btn.disabled = true;
+      btn.textContent = "Saving...";
+      const body = buildPatchBodyForMetric(row, fieldKey, num);
+      if (!body) {
+        alert("Total is derived. Edit Images or Reels.");
+        return;
+      }
+      await patchRowToBackend(rowId, body);
+      closeEditMetricModal();
+      await reloadFromXanoAndRefresh();
+    } catch (err) {
+      alert("Save failed: " + String(err?.message || err));
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Update";
+    }
+  });
+
+  const tu = document.getElementById("editTextUpdate");
+  if (tu) tu.addEventListener("click", async () => {
+    const mode = tu.dataset.mode || "";
+    const btn = tu;
+    const val = (document.getElementById("editTextNewValue") || {}).value;
+    const payloadVal = (val === "" ? null : val);
+    try {
+      btn.disabled = true;
+      btn.textContent = "Saving...";
+      if (mode === "press") {
+        const row = editTextModalState?.row;
+        const rowId = getRowId(row);
+        if (!rowId) return alert("Missing record id.");
+        await patchRowToBackend(rowId, { monthly_press_coverage: payloadVal });
+        closeEditTextModal();
+        await reloadFromXanoAndRefresh();
+        return;
+      }
+      if (mode === "notes") {
+        const row = editNotesModalState?.row;
+        const rowId = getRowId(row);
+        if (!rowId) return alert("Missing record id.");
+        await patchRowToBackend(rowId, { [NOTES_FIELD_KEY]: payloadVal });
+        closeEditTextModal();
+        await reloadFromXanoAndRefresh();
+        return;
+      }
+    } catch (err) {
+      alert("Save failed: " + String(err?.message || err));
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Update";
+    }
+  });
+
+  window.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (editModalState) closeEditMetricModal();
+    if (editTextModalState || editNotesModalState) closeEditTextModal();
+  });
 }
 
 /* -------------------------
    Table/chart styling & helpers
    ------------------------- */
-function formatUtcTimestamp(dt){ const yyyy=dt.getUTCFullYear(), mm=String(dt.getUTCMonth()+1).padStart(2,"0"), dd=String(dt.getUTCDate()).padStart(2,"0"); const hh=String(dt.getUTCHours()).padStart(2,"0"), mi=String(dt.getUTCMinutes()).padStart(2,"0"), ss=String(dt.getUTCSeconds()).padStart(2,"0"); return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss} UTC`; }
-function setLastUpdatedAtText(){ const el=document.getElementById("lastUpdatedAt"); if(!el) return; el.textContent = state.lastLoadedAtUtc ? `Last updated: ${formatUtcTimestamp(state.lastLoadedAtUtc)}` : ""; }
-function downloadDataUrl(filename,dataUrl){ const a=document.createElement("a"); a.href=dataUrl; a.download=filename; document.body.appendChild(a); a.click(); a.remove(); }
-function downloadChartAs(type){ const canvas=document.getElementById("metricChart"); if(!canvas) return alert("Chart not found."); const ext=type==="image/jpeg"?"jpg":"png"; const dataUrl=canvas.toDataURL(type,0.92); downloadDataUrl(`chart.${ext}`,dataUrl); }
-function downloadChartPdfViaPrint(){ const canvas=document.getElementById("metricChart"); if(!canvas) return alert("Chart not found."); const img=canvas.toDataURL("image/png"); const w=window.open("","_blank"); if(!w) return alert("Popup blocked"); w.document.open(); w.document.write(`<!doctype html><html><head><title>Chart</title><style>body{margin:0;padding:24px;font-family:system-ui,-apple-system,Segoe UI,Roboto;}img{max-width:100%;height:auto}.hint{margin-top:12px;opacity:0.7;font-size:12px}</style></head><body><img src="${img}" /><div class="hint">Use Print (Ctrl+P) and Save as PDF.</div></body></html>`); w.document.close(); w.focus(); }
-function wireChartDownloadButtons(){ const png=document.getElementById("downloadChartPng"), jpg=document.getElementById("downloadChartJpg"), pdf=document.getElementById("downloadChartPdf"); if(png) png.addEventListener("click",()=>downloadChartAs("image/png")); if(jpg) jpg.addEventListener("click",()=>downloadChartAs("image/jpeg")); if(pdf) pdf.addEventListener("click", downloadChartPdfViaPrint); }
+function formatUtcTimestamp(dt) {
+  const yyyy = dt.getUTCFullYear(),
+    mm = String(dt.getUTCMonth() + 1).padStart(2, "0"),
+    dd = String(dt.getUTCDate()).padStart(2, "0");
+  const hh = String(dt.getUTCHours()).padStart(2, "0"),
+    mi = String(dt.getUTCMinutes()).padStart(2, "0"),
+    ss = String(dt.getUTCSeconds()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss} UTC`;
+}
+function setLastUpdatedAtText() {
+  const el = document.getElementById("lastUpdatedAt");
+  if (!el) return;
+  el.textContent = state.lastLoadedAtUtc
+    ? `Last updated: ${formatUtcTimestamp(state.lastLoadedAtUtc)}`
+    : "";
+}
+function downloadDataUrl(filename, dataUrl) {
+  const a = document.createElement("a");
+  a.href = dataUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+function downloadChartAs(type) {
+  const canvas = document.getElementById("metricChart");
+  if (!canvas) return alert("Chart not found.");
+  const ext = type === "image/jpeg" ? "jpg" : "png";
+  const dataUrl = canvas.toDataURL(type, 0.92);
+  downloadDataUrl(`chart.${ext}`, dataUrl);
+}
+function downloadChartPdfViaPrint() {
+  const canvas = document.getElementById("metricChart");
+  if (!canvas) return alert("Chart not found.");
+  const img = canvas.toDataURL("image/png");
+  const w = window.open("", "_blank");
+  if (!w) return alert("Popup blocked");
+  w.document.open();
+  w.document.write(
+    `<!doctype html><html><head><title>Chart</title><style>body{margin:0;padding:24px;font-family:system-ui,-apple-system,Segoe UI,Roboto;}img{max-width:100%;height:auto}.hint{margin-top:12px;opacity:0.7;font-size:12px}</style></head><body><img src="${img}" /><div class="hint">Use Print (Ctrl+P) and Save as PDF.</div></body></html>`
+  );
+  w.document.close();
+  w.focus();
+}
+function wireChartDownloadButtons() {
+  const png = document.getElementById("downloadChartPng"),
+    jpg = document.getElementById("downloadChartJpg"),
+    pdf = document.getElementById("downloadChartPdf");
+  if (png) png.addEventListener("click", () => downloadChartAs("image/png"));
+  if (jpg) jpg.addEventListener("click", () => downloadChartAs("image/jpeg"));
+  if (pdf) pdf.addEventListener("click", downloadChartPdfViaPrint);
+}
 
-function applyMetricsTableStyling(){ const root=document.getElementById("metricsDisplay"); const table=root?.querySelector("table"); if(!table) return; root.querySelectorAll(".clickable-metric").forEach(n=>n.style.textDecoration="none"); table.querySelectorAll("td").forEach(td=>{ td.style.textAlign="center"; td.style.verticalAlign="middle"; }); table.querySelectorAll("tr").forEach(tr=>{ const tds=tr.querySelectorAll("td"); if(tds[0]) tds[0].style.textAlign="left"; if(tds[1]) tds[1].style.textAlign="left"; }); table.querySelectorAll("td").forEach(td=>{ if(td.querySelector(".metrics-rich")) td.style.textAlign="left"; }); }
+function applyMetricsTableStyling() {
+  const root = document.getElementById("metricsDisplay");
+  const table = root?.querySelector("table");
+  if (!table) return;
+  root.querySelectorAll(".clickable-metric").forEach(n => n.style.textDecoration = "none");
+  table.querySelectorAll("td").forEach(td => {
+    td.style.textAlign = "center";
+    td.style.verticalAlign = "middle";
+  });
+  table.querySelectorAll("tr").forEach(tr => {
+    const tds = tr.querySelectorAll("td");
+    if (tds[0]) tds[0].style.textAlign = "left";
+    if (tds[1]) tds[1].style.textAlign = "left";
+  });
+  table.querySelectorAll("td").forEach(td => {
+    if (td.querySelector(".metrics-rich")) td.style.textAlign = "left";
+  });
+}
 
 /* -------------------------
-   Helper utilities used in multiple places
+   Helper utilities
    ------------------------- */
-function uniqueCompanies(rows){ const set=new Set(rows.map(r=>normalizeCompanyName(r.company)).filter(Boolean)); return Array.from(set).sort(companySort); }
-function findRowByCompanyAndMonth(companyName, monthKey){ return state.rows.find(r=>String(r.company)===String(companyName) && monthKeyFromYearMonthName(r.year, r.month)===monthKey); }
+function uniqueCompanies(rows) {
+  const set = new Set(rows.map(r => normalizeCompanyName(r.company)).filter(Boolean));
+  return Array.from(set).sort(companySort);
+}
+function findRowByCompanyAndMonth(companyName, monthKey) {
+  return state.rows.find(
+    r =>
+      String(r.company) === String(companyName) &&
+      monthKeyFromYearMonthName(r.year, r.month) === monthKey
+  );
+}
 
 /* -------------------------
-   Refresh / reload (canonical implementation)
+   Refresh / reload
    ------------------------- */
 async function reloadFromXanoAndRefresh() {
   try {
     const rawRows = await fetchRowsFromBackend();
     const raw = Array.isArray(rawRows) ? rawRows : (rawRows?.items || rawRows?.data || []);
     state.rows = (Array.isArray(raw) ? raw : []).map(normalizeRow);
+
     state.latestMonthKey = computeLatestMonthKey(state.rows);
     const { min, max } = computeMinMaxMonthKey(state.rows);
-    state.minMonthKey = min; state.maxMonthKey = max;
+    state.minMonthKey = min;
+    state.maxMonthKey = max;
     state.lastLoadedAtUtc = new Date();
+
     const companies = uniqueCompanies(state.rows);
     if (state.selectedCompanies.size === 0) companies.forEach(c => state.selectedCompanies.add(c));
     else for (const c of Array.from(state.selectedCompanies)) if (!companies.includes(c)) state.selectedCompanies.delete(c);
+
     renderCompanyToggles(companies);
+
     if (!state.visibleMonths.length) {
       const defaultKey = state.latestMonthKey;
       state.visibleMonths = defaultKey ? [defaultKey] : [];
-      state.rangeStartKey = defaultKey; state.rangeEndKey = defaultKey;
+      state.rangeStartKey = defaultKey;
+      state.rangeEndKey = defaultKey;
     }
+
     ensureChartMetricOptions(true);
     refresh();
     return;
@@ -579,13 +1102,11 @@ async function reloadFromXanoAndRefresh() {
     throw err;
   }
 }
-
-// Alias for any code calling either name
 window.reloadFromXanoAndRefresh = reloadFromXanoAndRefresh;
 window.reloadFromZapierAndRefresh = reloadFromXanoAndRefresh;
 
 /* -------------------------
-   Helper: render company toggles
+   Company toggles
    ------------------------- */
 function renderCompanyToggles(companies) {
   const mount = document.getElementById("companyToggle");
@@ -599,7 +1120,29 @@ function renderCompanyToggles(companies) {
       checkbox.checked ? state.selectedCompanies.add(name) : state.selectedCompanies.delete(name);
       refresh();
     });
-    mount.appendChild(el("div", { className: "toggle" }, [ checkbox, el("label", { for: id, text: name }) ]));
+    mount.appendChild(
+      el("div", { className: "toggle" }, [
+        checkbox,
+        el("label", { for: id, text: name })
+      ])
+    );
+  }
+
+  const allOn = document.getElementById("companiesAllOn");
+  const allOff = document.getElementById("companiesAllOff");
+  if (allOn) {
+    allOn.onclick = () => {
+      companies.forEach(c => state.selectedCompanies.add(c));
+      renderCompanyToggles(companies);
+      refresh();
+    };
+  }
+  if (allOff) {
+    allOff.onclick = () => {
+      state.selectedCompanies.clear();
+      renderCompanyToggles(companies);
+      refresh();
+    };
   }
 }
 
@@ -607,32 +1150,106 @@ function renderCompanyToggles(companies) {
    Multi-month averaging
    ------------------------- */
 function averageNumericForCompanyAcrossMonths(companyName, monthKeys, fieldKey) {
-  const vals = monthKeys.map(mk => findRowByCompanyAndMonth(companyName, mk)).map(r => {
-    if (!r) return null;
-    if (fieldKey === "number_of_monthly_instagram_posts") return extractPostsTotal(r.number_of_monthly_instagram_posts);
-    if (fieldKey === "monthly_instagram_engagement") return extractEngagementTotal(r.monthly_instagram_engagement);
-    return toNumberOrNull(r[fieldKey]);
-  }).filter(v => v !== null);
+  const vals = monthKeys
+    .map(mk => findRowByCompanyAndMonth(companyName, mk))
+    .map(r => {
+      if (!r) return null;
+      if (fieldKey === "number_of_monthly_instagram_posts") return extractPostsTotal(r.number_of_monthly_instagram_posts);
+      if (fieldKey === "monthly_instagram_engagement") return extractEngagementTotal(r.monthly_instagram_engagement);
+      return toNumberOrNull(r[fieldKey]);
+    })
+    .filter(v => v !== null);
   if (!vals.length) return null;
   return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
 }
 
 /* -------------------------
-   Quick range helpers & range select helpers (unchanged)
+   Quick range helpers & range select helpers
    ------------------------- */
-function setQuickThisMonth(){ const key = currentMonthKeyUTC(); state.rangeStartKey = key; state.rangeEndKey = key; state.visibleMonths = [key]; refresh(); }
-function setQuickLastMonth(){ const key = lastMonthKeyUtcYYYYMM(); state.rangeStartKey = key; state.rangeEndKey = key; state.visibleMonths = key ? [key] : []; refresh(); }
-function fillMonthSelect(selectEl){ if(!selectEl) return; selectEl.innerHTML=""; for(const m of MONTH_LABELS){ const opt=document.createElement("option"); opt.value=m.value; opt.textContent=m.name; selectEl.appendChild(opt);} }
-function fillYearSelect(selectEl, minYear, maxYear){ if(!selectEl) return; selectEl.innerHTML=""; for(let y=minYear;y<=maxYear;y++){ const opt=document.createElement("option"); opt.value=String(y); opt.textContent=String(y); selectEl.appendChild(opt);} }
-function setRangeSelectorsFromKeys(startKey, endKey){ const s=parseMonthKey(startKey), e=parseMonthKey(endKey); if(!s||!e) return; const sy=document.getElementById("startYear"), sm=document.getElementById("startMonth"), ey=document.getElementById("endYear"), em=document.getElementById("endMonth"); if(sy) sy.value=String(s.year); if(sm) sm.value=s.month; if(ey) ey.value=String(e.year); if(em) em.value=e.month; }
+function setQuickThisMonth() {
+  const key = currentMonthKeyUTC();
+  state.rangeStartKey = key;
+  state.rangeEndKey = key;
+  state.visibleMonths = [key];
+  refresh();
+}
+function setQuickLastMonth() {
+  const key = lastMonthKeyUtcYYYYMM();
+  state.rangeStartKey = key;
+  state.rangeEndKey = key;
+  state.visibleMonths = key ? [key] : [];
+  refresh();
+}
+function fillMonthSelect(selectEl) {
+  if (!selectEl) return;
+  selectEl.innerHTML = "";
+  for (const m of MONTH_LABELS) {
+    const opt = document.createElement("option");
+    opt.value = m.value;
+    opt.textContent = m.name;
+    selectEl.appendChild(opt);
+  }
+}
+function fillYearSelect(selectEl, minYear, maxYear) {
+  if (!selectEl) return;
+  selectEl.innerHTML = "";
+  for (let y = minYear; y <= maxYear; y++) {
+    const opt = document.createElement("option");
+    opt.value = String(y);
+    opt.textContent = String(y);
+    selectEl.appendChild(opt);
+  }
+}
+function setRangeSelectorsFromKeys(startKey, endKey) {
+  const s = parseMonthKey(startKey), e = parseMonthKey(endKey);
+  if (!s || !e) return;
+  const sy = document.getElementById("startYear"),
+    sm = document.getElementById("startMonth"),
+    ey = document.getElementById("endYear"),
+    em = document.getElementById("endMonth");
+  if (sy) sy.value = String(s.year);
+  if (sm) sm.value = s.month;
+  if (ey) ey.value = String(e.year);
+  if (em) em.value = e.month;
+}
 
 /* -------------------------
-   Refresh wrapper (shows metrics and chart)
+   Refresh wrapper
    ------------------------- */
-function refresh(){ const mount=document.getElementById("metricsDisplay"); if(!mount) return; mount.innerHTML=""; if(!state.latestMonthKey){ mount.appendChild(el("p",{className:"muted", text:"No data found in backend."})); destroyChart(); return; } const visibleMonths = state.visibleMonths.length ? state.visibleMonths : [state.latestMonthKey]; const selected = uniqueCompanies(state.rows).filter(c=>state.selectedCompanies.has(c)); const lastUpdatedEl=document.getElementById("lastUpdated"); if(lastUpdatedEl) lastUpdatedEl.textContent = `Loaded from backend. Latest month: ${state.latestMonthKey}. Viewing: ${visibleMonths.join(", ")}.`; setLastUpdatedAtText(); if(!selected.length){ mount.appendChild(el("p",{className:"muted", text:"No companies selected."})); destroyChart(); return; } mount.appendChild(buildMetricsTable(visibleMonths, selected)); ensureChartMetricOptions(false); renderChart(); applyMetricsTableStyling(); }
+function refresh() {
+  const mount = document.getElementById("metricsDisplay");
+  if (!mount) return;
+  mount.innerHTML = "";
+
+  if (!state.latestMonthKey) {
+    mount.appendChild(el("p", { className: "muted", text: "No data found in backend." }));
+    destroyChart();
+    return;
+  }
+
+  const visibleMonths = state.visibleMonths.length ? state.visibleMonths : [state.latestMonthKey];
+  const selected = uniqueCompanies(state.rows).filter(c => state.selectedCompanies.has(c));
+
+  const lastUpdatedEl = document.getElementById("lastUpdated");
+  if (lastUpdatedEl)
+    lastUpdatedEl.textContent = `Loaded from backend. Latest month: ${state.latestMonthKey}. Viewing: ${visibleMonths.join(", ")}.`;
+
+  setLastUpdatedAtText();
+
+  if (!selected.length) {
+    mount.appendChild(el("p", { className: "muted", text: "No companies selected." }));
+    destroyChart();
+    return;
+  }
+
+  mount.appendChild(buildMetricsTable(visibleMonths, selected));
+  ensureChartMetricOptions(false);
+  renderChart();
+  applyMetricsTableStyling();
+}
 
 /* -------------------------
-   Debug overlay (button + panel)
+   Debug overlay
    ------------------------- */
 function createDebugUI() {
   if (document.getElementById("appDebugBtn")) return;
@@ -646,36 +1263,81 @@ function createDebugUI() {
 `;
   document.head.appendChild(style);
 
-  const btn = document.createElement("button"); btn.id = "appDebugBtn"; btn.textContent = "Debug"; document.body.appendChild(btn);
+  const btn = document.createElement("button");
+  btn.id = "appDebugBtn";
+  btn.textContent = "Debug";
+  document.body.appendChild(btn);
 
-  const panel = document.createElement("div"); panel.id = "appDebugPanel";
-  panel.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><h4>App Debug</h4><div><button id="appDbgRun">Run Checks</button><button id="appDbgClose">Close</button></div></div><div id="appDbgOut"><pre>Ready. Click "Run Checks".</pre></div>`;
+  const panel = document.createElement("div");
+  panel.id = "appDebugPanel";
+  panel.innerHTML = `
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+  <h4>App Debug</h4>
+  <div>
+    <button id="appDbgRun">Run Checks</button>
+    <button id="appDbgClose">Close</button>
+  </div>
+</div>
+<div id="appDbgOut"><pre>Ready. Click "Run Checks".</pre></div>`;
   document.body.appendChild(panel);
 
-  btn.addEventListener("click", ()=>panel.style.display = panel.style.display === "none" ? "block" : "none");
-  document.getElementById("appDbgClose").addEventListener("click", ()=>panel.style.display = "none");
+  btn.addEventListener("click", () => {
+    panel.style.display = panel.style.display === "none" ? "block" : "none";
+  });
+  document.getElementById("appDbgClose").addEventListener("click", () => {
+    panel.style.display = "none";
+  });
 
   async function runChecks() {
     const out = document.getElementById("appDbgOut");
     out.innerHTML = "<pre>Running checks...\n</pre>";
     const log = (s) => { out.innerHTML += s + "\n"; };
     try {
-      const names = ["init","wireEditModals","fetchRowsFromBackend","patchRowToBackend","fetchEditKeyFromXano","verifyPassword","computeLatestMonthKey","computeMinMaxMonthKey","reloadFromXanoAndRefresh","applyCustomRangeFromSelectors","setLockedUI"];
+      const names = [
+        "init",
+        "wireEditModals",
+        "fetchRowsFromBackend",
+        "patchRowToBackend",
+        "fetchEditKeyFromXano",
+        "verifyPassword",
+        "computeLatestMonthKey",
+        "computeMinMaxMonthKey",
+        "reloadFromXanoAndRefresh",
+        "applyCustomRangeFromSelectors",
+        "setLockedUI"
+      ];
       for (const n of names) log(`${n}: ${(typeof window[n] === "function") ? "function" : typeof window[n]}`);
+
       log("\nTrying fetchEditKeyFromXano (6s timeout)...");
       if (typeof fetchEditKeyFromXano === "function") {
-        try { const val = await Promise.race([fetchEditKeyFromXano(), new Promise((_,r)=>setTimeout(()=>r(new Error("timeout")),6000))]); log("EDIT_KEY: " + JSON.stringify(val)); } catch (e) { log("EDIT_KEY error: " + String(e)); }
+        try {
+          const val = await Promise.race([
+            fetchEditKeyFromXano(),
+            new Promise((_, r) => setTimeout(() => r(new Error("timeout")), 6000))
+          ]);
+          log("EDIT_KEY: " + JSON.stringify(val));
+        } catch (e) {
+          log("EDIT_KEY error: " + String(e));
+        }
       } else log("fetchEditKeyFromXano not present.");
 
       log("\nTrying fetchRowsFromBackend (8s timeout)...");
       if (typeof fetchRowsFromBackend === "function") {
         try {
-          const rows = await Promise.race([fetchRowsFromBackend(), new Promise((_,r)=>setTimeout(()=>r(new Error("timeout")),8000))]);
+          const rows = await Promise.race([
+            fetchRowsFromBackend(),
+            new Promise((_, r) => setTimeout(() => r(new Error("timeout")), 8000))
+          ]);
           log("Rows fetched: " + (Array.isArray(rows) ? rows.length : typeof rows));
-          if (Array.isArray(rows) && rows.length) log("Sample keys: " + Object.keys(rows[0]).slice(0,12).join(", "));
-          else log("Rows preview: " + JSON.stringify(rows).slice(0,400));
-        } catch (e) { log("Rows fetch error: " + String(e)); }
+          if (Array.isArray(rows) && rows.length)
+            log("Sample keys: " + Object.keys(rows[0]).slice(0, 12).join(", "));
+          else
+            log("Rows preview: " + JSON.stringify(rows).slice(0, 400));
+        } catch (e) {
+          log("Rows fetch error: " + String(e));
+        }
       } else log("fetchRowsFromBackend not present.");
+
       log("\nDone.");
     } catch (err) {
       out.innerHTML += "\nError running checks: " + String(err);
@@ -683,17 +1345,24 @@ function createDebugUI() {
   }
   document.getElementById("appDbgRun").addEventListener("click", runChecks);
 }
-
-// create debug UI asap
-if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", createDebugUI); else setTimeout(createDebugUI, 0);
+if (document.readyState === "loading")
+  document.addEventListener("DOMContentLoaded", createDebugUI);
+else
+  setTimeout(createDebugUI, 0);
 
 /* -------------------------
-   Init
+   Init / auth
    ------------------------- */
-async function attemptUnlock(password){ setEditKey(password); const ok = await verifyPassword(password); if(!ok) return false; await reloadFromXanoAndRefresh(); return true; }
+async function attemptUnlock(password) {
+  setEditKey(password);
+  const ok = await verifyPassword(password);
+  if (!ok) return false;
+  await reloadFromXanoAndRefresh();
+  return true;
+}
 
-async function init(){
-  try{
+async function init() {
+  try {
     wireEditModals();
     ensureChartMetricOptions(true);
     wireChartDownloadButtons();
@@ -701,30 +1370,70 @@ async function init(){
     const chartSelect = document.getElementById("chartMetricSelect");
     if (chartSelect) chartSelect.addEventListener("change", renderChart);
 
-    // Removed Collect/Test Zap buttons wiring per request.
-    // If the DOM still contains those buttons, they will be inert; to fully remove them from UI remove HTML markup.
+    const pwInput = document.getElementById("pagePassword");
+    if (pwInput) {
+      pwInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          const unlockBtn = document.getElementById("unlockBtn");
+          if (unlockBtn) unlockBtn.click();
+        }
+      });
+    }
 
-    const pwInput = document.getElementById("pagePassword"); if (pwInput) pwInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); const unlockBtn = document.getElementById("unlockBtn"); if (unlockBtn) unlockBtn.click(); } });
+    const applyRangeBtn = document.getElementById("applyRange");
+    if (applyRangeBtn) applyRangeBtn.addEventListener("click", applyCustomRangeFromSelectors);
 
-    const applyRangeBtn = document.getElementById("applyRange"); if (applyRangeBtn) applyRangeBtn.addEventListener("click", applyCustomRangeFromSelectors);
-    const quickThis = document.getElementById("quickThisMonth"); if (quickThis) quickThis.addEventListener("change", (e) => { if (e.target.checked) setQuickThisMonth(); });
-    const quickLast = document.getElementById("quickLastMonth"); if (quickLast) quickLast.addEventListener("change", (e) => { if (e.target.checked) setQuickLastMonth(); });
+    const quickThis = document.getElementById("quickThisMonth");
+    if (quickThis) {
+      quickThis.addEventListener("change", (e) => {
+        if (e.target.checked) setQuickThisMonth();
+      });
+    }
 
-    const lockBtn = document.getElementById("lockBtn"); if (lockBtn) lockBtn.addEventListener("click", () => { clearEditKey(); setLockedUI(true); });
+    const quickLast = document.getElementById("quickLastMonth");
+    if (quickLast) {
+      quickLast.addEventListener("change", (e) => {
+        if (e.target.checked) setQuickLastMonth();
+      });
+    }
+
+    const lockBtn = document.getElementById("lockBtn");
+    if (lockBtn) {
+      lockBtn.addEventListener("click", () => {
+        clearEditKey();
+        setLockedUI(true);
+      });
+    }
+
     const unlockBtn = document.getElementById("unlockBtn");
     if (unlockBtn) {
       unlockBtn.addEventListener("click", async () => {
         const pw = (document.getElementById("pagePassword") || {}).value;
         const errMount = document.getElementById("lockError");
         if (errMount) errMount.textContent = "";
-        try { const ok = await attemptUnlock(pw); if (!ok) throw new Error("Incorrect password."); setLockedUI(false);
+        try {
+          const ok = await attemptUnlock(pw);
+          if (!ok) throw new Error("Incorrect password.");
+
+          setLockedUI(false);
+
           if (state.minMonthKey && state.maxMonthKey) {
-            const minY = Number(state.minMonthKey.split("-")[0]); const maxY = Number(state.maxMonthKey.split("-")[0]);
-            fillYearSelect(document.getElementById("startYear"), minY, maxY); fillYearSelect(document.getElementById("endYear"), minY, maxYear);
-            fillMonthSelect(document.getElementById("startMonth")); fillMonthSelect(document.getElementById("endMonth"));
+            const minY = Number(state.minMonthKey.split("-")[0]);
+            const maxY = Number(state.maxMonthKey.split("-")[0]);
+
+            fillYearSelect(document.getElementById("startYear"), minY, maxY);
+            fillYearSelect(document.getElementById("endYear"), minY, maxY);
+
+            fillMonthSelect(document.getElementById("startMonth"));
+            fillMonthSelect(document.getElementById("endMonth"));
+
             setRangeSelectorsFromKeys(state.rangeStartKey, state.rangeEndKey);
           }
-        } catch (err) { clearEditKey(); if (errMount) errMount.textContent = `Unlock failed: ${String(err?.message || err)}`; }
+        } catch (err) {
+          clearEditKey();
+          if (errMount) errMount.textContent = `Unlock failed: ${String(err?.message || err)}`;
+        }
       });
     }
 
@@ -738,7 +1447,7 @@ async function init(){
 }
 
 /* -------------------------
-   Exports & boot
+   Boot
    ------------------------- */
 window.fetchRowsFromBackend = fetchRowsFromBackend;
 window.patchRowToBackend = patchRowToBackend;
@@ -749,5 +1458,9 @@ window.reloadFromZapierAndRefresh = reloadFromXanoAndRefresh;
 
 window.addEventListener("DOMContentLoaded", () => {
   try { createDebugUI(); } catch (e) { console.warn("createDebugUI failed:", e); }
-  init().catch(err => { console.error("App init error:", err); const lockErr = document.getElementById("lockError"); if (lockErr) lockErr.textContent = String(err?.stack || err); });
+  init().catch(err => {
+    console.error("App init error:", err);
+    const lockErr = document.getElementById("lockError");
+    if (lockErr) lockErr.textContent = String(err?.stack || err);
+  });
 });
