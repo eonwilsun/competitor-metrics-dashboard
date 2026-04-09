@@ -1,6 +1,5 @@
-// Full replacement: Adds server-triggered Apply Range -> Zap -> callback polling flow,
-// plus the full original app logic. Overwrite your existing assets/app.js with this file
-// and hard-refresh the page after deploying.
+// Full replacement: Use Xano API data only and remove Collect/Test Zap UI & helpers.
+// Overwrite your existing assets/app.js with this file and hard-refresh the page after deploying.
 
 /* -------------------------
    Session / Edit Key helpers
@@ -20,19 +19,14 @@ function _getCfg(key) {
 }
 
 /* -------------------------
-   Zapier / Xano config helpers
+   Xano / Zapier config helpers
    ------------------------- */
-// Default Zap URL (your webhook) - runtime overrides allowed
+// Note: App now prefers Xano only. Zapier helpers left for backward compatibility but not used.
 const DEFAULT_ZAPIER_URL = "https://hooks.zapier.com/hooks/catch/2414815/u7tlcn7/";
-
 function getZapierTableGetUrl() { return _getCfg("ZAPIER_TABLE_GET_URL") || DEFAULT_ZAPIER_URL; }
-function setZapierTableGetUrlForSession(url) { try { if (!url) sessionStorage.removeItem("ZAPIER_TABLE_GET_URL"); else sessionStorage.setItem("ZAPIER_TABLE_GET_URL", String(url).trim()); } catch(e){} }
 function getZapierTablePatchUrl() { return _getCfg("ZAPIER_TABLE_PATCH_URL") || DEFAULT_ZAPIER_URL; }
-function setZapierTablePatchUrlForSession(url) { try { if (!url) sessionStorage.removeItem("ZAPIER_TABLE_PATCH_URL"); else sessionStorage.setItem("ZAPIER_TABLE_PATCH_URL", String(url).trim()); } catch(e){} }
 function getZapierConfigGetUrl() { return _getCfg("ZAPIER_CONFIG_GET_URL"); }
-function setZapierConfigGetUrlForSession(url) { try { if (!url) sessionStorage.removeItem("ZAPIER_CONFIG_GET_URL"); else sessionStorage.setItem("ZAPIER_CONFIG_GET_URL", String(url).trim()); } catch(e){} }
 function getZapierHook() { return _getCfg("ZAPIER_CATCH_HOOK_URL"); }
-function setZapierHookForSession(url) { try { if (!url) sessionStorage.removeItem("ZAPIER_CATCH_HOOK_URL"); else sessionStorage.setItem("ZAPIER_CATCH_HOOK_URL", String(url).trim()); } catch(e){} }
 
 // Xano runtime override getters
 function getXanoTableGetUrl() { return _getCfg("XANO_TABLE_GET_URL"); }
@@ -144,79 +138,32 @@ async function xanoFetch(pathOrUrl, { method = "GET", body = null, withEditKey =
 }
 
 /* -------------------------
-   Backend adapters (Xano primary, Zapier fallback)
+   Backend adapter (Xano primary)
    ------------------------- */
 async function fetchRowsFromBackend() {
-  // Try Xano first (use session/app override if present)
+  // Use Xano only
   const xanoUrl = getXanoTableGetUrl() || (XANO_BASE_URL + XANO_TABLE_PATH);
-  if (xanoUrl) {
-    try {
-      console.debug("fetchRowsFromBackend: trying Xano:", xanoUrl);
-      const res = await apiFetch(xanoUrl, { method: "GET" });
-      // Normalize common Xano shapes
-      if (Array.isArray(res)) {
-        console.debug("fetchRowsFromBackend: Xano returned array, count=", res.length);
-        return res;
-      }
-      if (res && Array.isArray(res.items)) {
-        console.debug("fetchRowsFromBackend: Xano returned .items, count=", res.items.length);
-        return res.items;
-      }
-      if (res && Array.isArray(res.data)) {
-        console.debug("fetchRowsFromBackend: Xano returned .data, count=", res.data.length);
-        return res.data;
-      }
-      if (res && typeof res === "object") {
-        for (const k of Object.keys(res)) {
-          if (Array.isArray(res[k])) {
-            console.debug("fetchRowsFromBackend: Xano returned array in property", k, "count=", res[k].length);
-            return res[k];
-          }
-        }
-      }
-      console.debug("fetchRowsFromBackend: Xano returned no recognizable array shape, returning []");
-      return [];
-    } catch (err) {
-      console.warn("fetchRowsFromBackend: Xano GET failed, will try Zapier fallback:", err);
-    }
-  } else {
-    console.warn("fetchRowsFromBackend: no Xano URL configured, will try Zapier fallback");
+  if (!xanoUrl) {
+    console.warn("fetchRowsFromBackend: no Xano URL configured");
+    return [];
   }
-
-  // Zapier fallback (use this only if Xano failed / not configured)
-  const zapGet = getZapierTableGetUrl();
-  if (zapGet) {
-    try {
-      console.debug("fetchRowsFromBackend: trying Zapier:", zapGet);
-      const rows = await apiFetch(zapGet, { method: "GET" });
-      if (Array.isArray(rows)) return rows;
-      if (rows && Array.isArray(rows.items)) return rows.items;
-      if (rows && Array.isArray(rows.data)) return rows.data;
-      if (rows && typeof rows === "object") {
-        for (const k of Object.keys(rows)) if (Array.isArray(rows[k])) return rows[k];
-      }
-      return [];
-    } catch (e) {
-      console.warn("fetchRowsFromBackend: Zapier GET failed:", e);
-    }
+  try {
+    console.debug("fetchRowsFromBackend: fetching from Xano:", xanoUrl);
+    const res = await apiFetch(xanoUrl, { method: "GET" });
+    // Normalize shapes
+    if (Array.isArray(res)) return res;
+    if (res && Array.isArray(res.items)) return res.items;
+    if (res && Array.isArray(res.data)) return res.data;
+    for (const k of Object.keys(res || {})) if (Array.isArray(res[k])) return res[k];
+    return [];
+  } catch (err) {
+    console.error("fetchRowsFromBackend: Xano GET failed:", err);
+    return [];
   }
-
-  // Final fallback: no rows
-  console.debug("fetchRowsFromBackend: no backend returned rows, returning []");
-  return [];
 }
 
 async function patchRowToBackend(rowId, fields) {
-  const zapPatch = getZapierTablePatchUrl();
-  if (zapPatch) {
-    try {
-      const payload = { id: rowId, fields };
-      const updated = await apiFetch(zapPatch, { method: "POST", body: payload });
-      return updated;
-    } catch (e) {
-      console.warn("Zapier PATCH failed, attempting Xano fallback:", e);
-    }
-  }
+  // Patch Xano record directly
   const base = getXanoTablePatchUrl() || (XANO_BASE_URL + XANO_TABLE_PATH);
   const url = `${base.replace(/\/$/,"")}/${encodeURIComponent(rowId)}`;
   const updated = await apiFetch(url, { method: "PATCH", body: fields });
@@ -323,16 +270,12 @@ function computeMinMaxMonthKey(rows) {
 }
 
 /* -------------------------
-   NEW: Range request -> trigger & poll helpers
+   applyCustomRangeFromSelectors + alias (server-backed)
+   This still uses the server trigger/poll flow if you have it configured.
    ------------------------- */
-/**
- * requestRangeFromServer(payload)
- * - payload: { request_id, start_year, start_month, end_year, end_month, company? }
- * - POSTs to Xano trigger endpoint and returns parsed JSON (expecting request_id)
- */
 async function requestRangeFromServer(payload) {
   const url = sessionStorage.getItem('XANO_RANGE_TRIGGER_URL') || getRangeTriggerUrl();
-  if (!url) throw new Error('No XANO range trigger URL configured. Set sessionStorage XANO_RANGE_TRIGGER_URL or configure APP_CONFIG.');
+  if (!url) throw new Error('No XANO range trigger URL configured.');
   const headers = { 'Content-Type': 'application/json' };
   const k = getEditKey();
   if (k) headers['x-edit-key'] = k;
@@ -343,14 +286,9 @@ async function requestRangeFromServer(payload) {
   }
   return await res.json().catch(()=> ({ request_id: payload.request_id, status: 'pending' }));
 }
-
-/**
- * pollRangeResults(requestId, attempts = 30, delayMs = 1000)
- * - GETs range result URL until { status: 'ready', rows: [...] } or timeout
- */
 async function pollRangeResults(requestId, attempts = 30, delayMs = 1000) {
   const base = sessionStorage.getItem('XANO_RANGE_RESULT_URL_BASE') || getRangeResultUrlBase();
-  if (!base) throw new Error('No XANO range result URL configured. Set sessionStorage XANO_RANGE_RESULT_URL_BASE or configure APP_CONFIG.');
+  if (!base) throw new Error('No XANO range result URL configured.');
   const key = getEditKey();
   const url = base + (base.includes('?') ? '&' : '?') + 'request_id=' + encodeURIComponent(requestId);
   for (let i = 0; i < attempts; i++) {
@@ -362,66 +300,27 @@ async function pollRangeResults(requestId, attempts = 30, delayMs = 1000) {
         const json = await res.json().catch(()=>null);
         if (json && json.status === 'ready') return json.rows || [];
       }
-      // treat 202/404 as pending; other statuses logged and retried
-    } catch (err) {
-      console.warn('pollRangeResults transient error', err);
-    }
+    } catch (err) { console.warn('pollRangeResults transient error', err); }
     await new Promise(r => setTimeout(r, delayMs));
   }
   throw new Error('Timed out waiting for range results from server.');
 }
-
-/* -------------------------
-   applyCustomRangeFromSelectors + alias (server-backed)
-   Now triggers server -> Zap -> callback and waits for results.
-   ------------------------- */
 async function applyCustomRangeFromSelectors() {
-  const startKey = monthKeyFromYYYYMMParts(
-    (document.getElementById("startYear") || {}).value,
-    (document.getElementById("startMonth") || {}).value
-  );
-  const endKey = monthKeyFromYYYYMMParts(
-    (document.getElementById("endYear") || {}).value,
-    (document.getElementById("endMonth") || {}).value
-  );
-
+  const startKey = monthKeyFromYYYYMMParts((document.getElementById("startYear") || {}).value, (document.getElementById("startMonth") || {}).value);
+  const endKey = monthKeyFromYYYYMMParts((document.getElementById("endYear") || {}).value, (document.getElementById("endMonth") || {}).value);
   if (!startKey || !endKey) return alert("Please select start and end month/year.");
   if (compareMonthKey(startKey, endKey) > 0) return alert("Start month must be before (or the same as) End month.");
-
-  const quickThis = document.getElementById("quickThisMonth");
-  const quickLast = document.getElementById("quickLastMonth");
-  if (quickThis) quickThis.checked = false;
-  if (quickLast) quickLast.checked = false;
-
-  // Update UI state immediately
-  state.rangeStartKey = startKey;
-  state.rangeEndKey = endKey;
-  state.visibleMonths = listMonthKeysBetween(startKey, endKey);
-
-  const applyBtn = document.getElementById("applyRange");
-  const prevText = applyBtn ? applyBtn.textContent : null;
-
+  state.rangeStartKey = startKey; state.rangeEndKey = endKey; state.visibleMonths = listMonthKeysBetween(startKey, endKey);
+  const applyBtn = document.getElementById("applyRange"); const prevText = applyBtn ? applyBtn.textContent : null;
   try {
     if (applyBtn) { applyBtn.disabled = true; applyBtn.textContent = "Working..."; }
-
     const requestId = `req-${Date.now()}-${Math.floor(Math.random()*10000)}`;
     const s = parseMonthKey(startKey), e = parseMonthKey(endKey);
-    const payload = {
-      request_id: requestId,
-      start_year: s.year,
-      start_month: String(s.month).padStart(2,"0"),
-      end_year: e.year,
-      end_month: String(e.month).padStart(2,"0")
-    };
-
+    const payload = { request_id: requestId, start_year: s.year, start_month: String(s.month).padStart(2,"0"), end_year: e.year, end_month: String(e.month).padStart(2,"0") };
     const companyInput = document.getElementById("companyFilter") || document.getElementById("company-filter");
     if (companyInput && companyInput.value) payload.company = companyInput.value;
-
-    // Trigger server which will forward to Zap
     await requestRangeFromServer(payload);
-
-    // Poll server for results (Zap will POST them back to server)
-    const rows = await pollRangeResults(requestId, 60, 1000); // up to ~60s
+    const rows = await pollRangeResults(requestId, 60, 1000);
     state.rows = (Array.isArray(rows) ? rows : []).map(normalizeRow);
     state.latestMonthKey = computeLatestMonthKey(state.rows);
     const { min, max } = computeMinMaxMonthKey(state.rows);
@@ -719,88 +618,16 @@ function averageNumericForCompanyAcrossMonths(companyName, monthKeys, fieldKey) 
 }
 
 /* -------------------------
-   Collect / dispatch (Xano)
+   Quick range helpers & range select helpers (unchanged)
    ------------------------- */
-async function triggerCollectDispatch({ test = false } = {}) {
-  const mk = lastMonthKeyUtcYYYYMM() || currentMonthKeyUTC();
-  const parts = String(mk).split("-").map(s => s.trim());
-  let year = String(new Date().getUTCFullYear());
-  let month = String(new Date().getUTCMonth() + 1).padStart(2, "0");
-  if (parts.length === 2) { year = String(parts[0]); month = String(parts[1]).padStart(2, "0"); }
-  const payload = { year: Number(year), month: String(month).padStart(2, "0"), month_key: `${String(year)}-${String(month).padStart(2,"0")}`, test: !!test };
-  const res = await xanoFetch("/trigger_collect", { method: "POST", body: payload, withEditKey: true });
-  if (!res || !res.ok || !res.run_id) throw new Error(`Dispatch failed: ${JSON.stringify(res)}`);
-  return res.run_id;
-}
-async function pollRunAndRefresh(runId, { intervalMs = 5000, timeoutMs = 5 * 60 * 1000 } = {}) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const status = await xanoFetch(`/run_status/${encodeURIComponent(runId)}`, { method: "GET", withEditKey: true });
-      if (status && status.finished) {
-        if (status.success) { try { await reloadFromXanoAndRefresh(); } catch (e) { console.warn("Refresh after run failed:", e); } return { ok: true, status }; }
-        return { ok: false, status };
-      }
-    } catch (err) { console.warn("pollRunAndRefresh transient error:", err); }
-    await new Promise(r => setTimeout(r, intervalMs));
-  }
-  return { ok: false, error: "timeout" };
-}
-
-/* -------------------------
-   Legacy Zapier collect hook
-   ------------------------- */
-async function triggerZapierCollectAgencyFeeSwiisLastMonth() {
-  const hook = getZapierHook();
-  if (hook) {
-    const payload = { action: "collect_agency_fees", company: "SWIIS", month_key: lastMonthKeyUtcYYYYMM(), source_url: "https://www.swiisfostercare.com/fostering/fostering-allowance-pay/" };
-    const res = await fetch(hook, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-    if (!res.ok) { const t = await res.text().catch(()=>""); throw new Error(`Zapier hook failed (${res.status}): ${t||res.statusText}`); }
-    return;
-  }
-  throw new Error("Missing ZAPIER_CATCH_HOOK_URL. Configure assets/config.js or set sessionStorage key 'ZAPIER_CATCH_HOOK_URL'.");
-}
-
-/* -------------------------
-   Test dispatch
-   ------------------------- */
-async function sendTestPayloadToZapier() {
-  const btn = document.getElementById("testZapBtn");
-  const prevText = btn ? btn.textContent : null;
-  try {
-    if (btn) { btn.disabled = true; btn.textContent = "Sending test..."; }
-    const runId = await triggerCollectDispatch({ test: true });
-    alert("Test dispatch started. Run ID: " + runId + ". The scraper will run and post results to Xano.");
-    console.log("Test dispatch started, runId:", runId);
-  } catch (err) {
-    alert("Test failed: " + String(err?.message || err));
-    console.error(err);
-  } finally { if (btn) { btn.disabled = false; btn.textContent = prevText; } }
-}
-
-/* -------------------------
-   Quick range helpers
-   ------------------------- */
-function setQuickThisMonth(){
-  const key = currentMonthKeyUTC();
-  state.rangeStartKey = key; state.rangeEndKey = key; state.visibleMonths = [key];
-  refresh();
-}
-function setQuickLastMonth(){
-  const key = lastMonthKeyUtcYYYYMM();
-  state.rangeStartKey = key; state.rangeEndKey = key; state.visibleMonths = key ? [key] : [];
-  refresh();
-}
-
-/* -------------------------
-   Range select helpers
-   ------------------------- */
+function setQuickThisMonth(){ const key = currentMonthKeyUTC(); state.rangeStartKey = key; state.rangeEndKey = key; state.visibleMonths = [key]; refresh(); }
+function setQuickLastMonth(){ const key = lastMonthKeyUtcYYYYMM(); state.rangeStartKey = key; state.rangeEndKey = key; state.visibleMonths = key ? [key] : []; refresh(); }
 function fillMonthSelect(selectEl){ if(!selectEl) return; selectEl.innerHTML=""; for(const m of MONTH_LABELS){ const opt=document.createElement("option"); opt.value=m.value; opt.textContent=m.name; selectEl.appendChild(opt);} }
 function fillYearSelect(selectEl, minYear, maxYear){ if(!selectEl) return; selectEl.innerHTML=""; for(let y=minYear;y<=maxYear;y++){ const opt=document.createElement("option"); opt.value=String(y); opt.textContent=String(y); selectEl.appendChild(opt);} }
 function setRangeSelectorsFromKeys(startKey, endKey){ const s=parseMonthKey(startKey), e=parseMonthKey(endKey); if(!s||!e) return; const sy=document.getElementById("startYear"), sm=document.getElementById("startMonth"), ey=document.getElementById("endYear"), em=document.getElementById("endMonth"); if(sy) sy.value=String(s.year); if(sm) sm.value=s.month; if(ey) ey.value=String(e.year); if(em) em.value=e.month; }
 
 /* -------------------------
-   Refresh wrapper
+   Refresh wrapper (shows metrics and chart)
    ------------------------- */
 function refresh(){ const mount=document.getElementById("metricsDisplay"); if(!mount) return; mount.innerHTML=""; if(!state.latestMonthKey){ mount.appendChild(el("p",{className:"muted", text:"No data found in backend."})); destroyChart(); return; } const visibleMonths = state.visibleMonths.length ? state.visibleMonths : [state.latestMonthKey]; const selected = uniqueCompanies(state.rows).filter(c=>state.selectedCompanies.has(c)); const lastUpdatedEl=document.getElementById("lastUpdated"); if(lastUpdatedEl) lastUpdatedEl.textContent = `Loaded from backend. Latest month: ${state.latestMonthKey}. Viewing: ${visibleMonths.join(", ")}.`; setLastUpdatedAtText(); if(!selected.length){ mount.appendChild(el("p",{className:"muted", text:"No companies selected."})); destroyChart(); return; } mount.appendChild(buildMetricsTable(visibleMonths, selected)); ensureChartMetricOptions(false); renderChart(); applyMetricsTableStyling(); }
 
@@ -874,21 +701,9 @@ async function init(){
     const chartSelect = document.getElementById("chartMetricSelect");
     if (chartSelect) chartSelect.addEventListener("change", renderChart);
 
-    const collectBtn = document.getElementById("collectDataBtn");
-    if (collectBtn) {
-      collectBtn.addEventListener("click", async () => {
-        const prevText = collectBtn.textContent;
-        try {
-          collectBtn.disabled = true; collectBtn.textContent = "Collecting...";
-          const runId = await triggerCollectDispatch();
-          const pollResult = await pollRunAndRefresh(runId, { intervalMs: 5000, timeoutMs: 5 * 60 * 1000 });
-          if (pollResult.ok) alert("Collect complete — dashboard updated.");
-          else { console.warn("Collect finished with issue:", pollResult); alert("Collect finished with a problem (see console)."); }
-        } catch (err) { alert(String(err?.message || err)); } finally { collectBtn.disabled = false; collectBtn.textContent = prevText; }
-      });
-    }
+    // Removed Collect/Test Zap buttons wiring per request.
+    // If the DOM still contains those buttons, they will be inert; to fully remove them from UI remove HTML markup.
 
-    const testBtn = document.getElementById("testZapBtn"); if (testBtn) testBtn.addEventListener("click", sendTestPayloadToZapier);
     const pwInput = document.getElementById("pagePassword"); if (pwInput) pwInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); const unlockBtn = document.getElementById("unlockBtn"); if (unlockBtn) unlockBtn.click(); } });
 
     const applyRangeBtn = document.getElementById("applyRange"); if (applyRangeBtn) applyRangeBtn.addEventListener("click", applyCustomRangeFromSelectors);
@@ -905,7 +720,7 @@ async function init(){
         try { const ok = await attemptUnlock(pw); if (!ok) throw new Error("Incorrect password."); setLockedUI(false);
           if (state.minMonthKey && state.maxMonthKey) {
             const minY = Number(state.minMonthKey.split("-")[0]); const maxY = Number(state.maxMonthKey.split("-")[0]);
-            fillYearSelect(document.getElementById("startYear"), minY, maxY); fillYearSelect(document.getElementById("endYear"), minY, maxY);
+            fillYearSelect(document.getElementById("startYear"), minY, maxY); fillYearSelect(document.getElementById("endYear"), minY, maxYear);
             fillMonthSelect(document.getElementById("startMonth")); fillMonthSelect(document.getElementById("endMonth"));
             setRangeSelectorsFromKeys(state.rangeStartKey, state.rangeEndKey);
           }
